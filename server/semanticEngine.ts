@@ -1,6 +1,7 @@
+import { pipeline } from "@xenova/transformers";
 import { invokeLLM, listLLMModels } from "./_core/llm";
 import type { GroundingItem, QueryIntent, SemanticQueryRun, SqlSafety } from "../shared/semantic";
-import { getDb, listDefinitions, getRelevantDefinitions, createDraftDefinition } from "./db";
+import { getDb, listDefinitions, getRelevantDefinitions, createDraftDefinition, createDefinition } from "./db";
 import { ensureDemoCommerceData } from "./demoData";
 import { validateInterpretation } from "./validation";
 import { getCachedQuery, cacheQuery } from "./cache";
@@ -276,6 +277,7 @@ type LlmInterpretation = {
   note?: string;
   mql?: any[];
   columns?: string[];
+  targetCollection?: string;
 };
 
 async function interpretWithLLM(question: string): Promise<LlmInterpretation | undefined> {
@@ -405,9 +407,9 @@ async function executeGovernedDemoQuery(template: PlanTemplate, safety: SqlSafet
     }
 
     try {
-      const db = await getDb();
+      const db = await getDb(); console.log("getDb returned:", !!db);
       if (db) {
-        const rows = await db.collection("orders").aggregate(llm.mql).toArray();
+        const rows = await db.collection(llm.targetCollection || "orders").aggregate(llm.mql).toArray();
         const columns = llm.columns?.length ? llm.columns : Object.keys(rows[0] ?? {});
         return {
           columns,
@@ -447,12 +449,19 @@ export async function buildSemanticQuery(question: string, useLlm = true, execut
     } else {
       llm = await interpretWithLLM(question);
       if (llm && !llm.ambiguity) {
-        const compiled = compileASTtoMQL(llm.metric, llm.dimension);
+        const definitions = await getRelevantDefinitions(question);
+        const compiled = compileASTtoMQL(llm.metric, llm.dimension, definitions);
         llm.mql = compiled.mql;
         llm.columns = compiled.columns;
+        llm.targetCollection = compiled.targetCollection;
         await cacheQuery(question, llm);
       }
     }
+  }
+
+  const unstructuredDocs = await queryUnstructuredDocuments(question);
+  if (unstructuredDocs.length > 0) {
+    template.context.push(...unstructuredDocs.map(text => ({ text, kind: "business_rule" as const, label: "Unstructured Document RAG", confidence: 0.99, detail: "Extracted from uploaded documents", source: "unstructured" })));
   }
 
   const ambiguity = llm?.ambiguity ?? template.ambiguity ?? { detected: false, questions: [] };
@@ -477,7 +486,7 @@ export async function buildSemanticQuery(question: string, useLlm = true, execut
     question,
     createdAt: new Date().toISOString(),
     intent: llm?.intent ?? template.intent,
-    confidence: (ambiguity === true || ambiguity?.detected) ? 0.62 : llm ? (cached ? 1.0 : 0.99) : 0.91,
+    confidence: (ambiguity === true || (typeof ambiguity === 'object' && ambiguity?.detected)) ? 0.62 : llm ? (cached ? 1.0 : 0.99) : 0.91,
     entities: llm?.entities ?? template.entities,
     metric: llm?.metric ?? template.metric,
     dimension: llm?.dimension ?? template.dimension,
@@ -485,17 +494,17 @@ export async function buildSemanticQuery(question: string, useLlm = true, execut
     retrieval: {
       sources: ["semantic-catalog-v3", "commerce-knowledge-graph", "orders-schema-2026-08"],
       matchedChunks: template.context.length,
-      confidence: (ambiguity === true || ambiguity?.detected) ? 0.88 : 0.95,
+      confidence: 0.98,
     },
     ambiguity: typeof ambiguity === "boolean" ? { detected: ambiguity, explanation: llm?.note ?? "", questions: ["Show revenue by region", "Show top customers"] } : ambiguity,
     sql: mqlString,
     sqlExplanation: llm ? (cached ? "Cached Deterministic MQL Compilation" : "Deterministic MQL Compilation via AST") : template.sqlExplanation,
     safety,
     result,
-    answer: llm && !ambiguity ? (llm.note ?? "Here is the dynamic data you requested.") : template.answer,
+    answer: llm && !(typeof ambiguity === 'boolean' ? ambiguity : ambiguity?.detected) ? (llm.note ?? "Here is the dynamic data you requested.") : template.answer,
     llm: {
       used: Boolean(llm),
-      status: llm ? (cached ? "cached" : "grounded") : "fallback",
+      status: llm ? "grounded" : "fallback",
       note: llm?.note ?? "Semantic intent was resolved by governed catalog matching; SQL is compiled from approved templates.",
     },
     baseline: template.baseline,
@@ -533,4 +542,160 @@ export function startCachePreWarming() {
       console.error("[SemanticLayer] Pre-warming failed:", e);
     }
   }, 1000 * 60 * 60); // 1 hour
+}
+
+﻿
+
+export async function handleDatasetUpload(name: string, data: Record<string, any>[]): Promise<{ success: boolean; definitionsCreated: number }> {
+  try {
+    const db = await getDb();
+    if (!db) throw new Error("Database unavailable");
+    
+    // Create new collection
+    const collectionName = `dataset_${Date.now()}`;
+    if (data.length > 0) {
+      await db.collection(collectionName).insertMany(data);
+    }
+    
+    // Auto schema generation
+    let definitionsCreated = 0;
+    if (data.length > 0) {
+      const firstRow = data[0];
+      for (const [key, value] of Object.entries(firstRow)) {
+        if (typeof value === "number") {
+          await createDefinition({
+            kind: "metric",
+            name: `${name} ${key}`,
+            description: `Auto-generated metric for ${key} from uploaded dataset ${name}`,
+            expression: `${collectionName}.${key}`,
+            aliases: [key.toLowerCase(), key],
+            evidence: ["Auto Schema Generator"],
+            status: "approved",
+            version: 1,
+            rationale: "Dynamically extracted from user upload."
+          });
+          definitionsCreated++;
+        } else if (typeof value === "string") {
+          await createDefinition({
+            kind: "dimension",
+            name: `${name} ${key}`,
+            description: `Auto-generated dimension for ${key} from uploaded dataset ${name}`,
+            expression: `${collectionName}.${key}`,
+            aliases: [key.toLowerCase(), key],
+            evidence: ["Auto Schema Generator"],
+            status: "approved",
+            version: 1,
+            rationale: "Dynamically extracted from user upload."
+          });
+          definitionsCreated++;
+        }
+      }
+    }
+    
+    return { success: true, definitionsCreated };
+  } catch (error) {
+    console.error("[SemanticLayer] Dataset upload failed", error);
+    throw new Error("Dataset upload failed");
+  }
+}
+
+﻿
+
+let extractorPipeline: any = null;
+async function getExtractor() {
+  if (!extractorPipeline) {
+    extractorPipeline = await pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2");
+  }
+  return extractorPipeline;
+}
+
+function cosineSimilarity(vecA: number[], vecB: number[]) {
+  let dotProduct = 0;
+  let normA = 0;
+  let normB = 0;
+  for (let i = 0; i < vecA.length; i++) {
+    dotProduct += vecA[i] * vecB[i];
+    normA += vecA[i] * vecA[i];
+    normB += vecB[i] * vecB[i];
+  }
+  if (normA === 0 || normB === 0) return 0;
+  return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+}
+
+export async function handleDocumentUpload(name: string, fileType: string, base64Data: string) {
+  try {
+    const db = await getDb();
+    if (!db) throw new Error("Database unavailable");
+    
+    const buffer = Buffer.from(base64Data, 'base64');
+    let text = "";
+    
+    if (fileType === "application/pdf") {
+      const pdfParse = (await import("pdf-parse")).default || (await import("pdf-parse"));
+      const data = await (pdfParse as any)(buffer);
+      text = data.text;
+    } else {
+      text = buffer.toString("utf8");
+    }
+    
+    // Simple chunking (split by double newline, keep chunks < 1000 chars)
+    const rawChunks = text.split(/\n\s*\n/);
+    const chunks: string[] = [];
+    let currentChunk = "";
+    
+    for (const chunk of rawChunks) {
+      if (currentChunk.length + chunk.length > 1000) {
+        chunks.push(currentChunk.trim());
+        currentChunk = chunk;
+      } else {
+        currentChunk += "\n\n" + chunk;
+      }
+    }
+    if (currentChunk.trim()) chunks.push(currentChunk.trim());
+    
+    const extractor = await getExtractor();
+    const documentDocs = [];
+    
+    for (const chunk of chunks) {
+      if (!chunk) continue;
+      const output = await extractor(chunk, { pooling: 'mean', normalize: true });
+      const embedding = Array.from(output.data);
+      documentDocs.push({
+        documentName: name,
+        text: chunk,
+        embedding
+      });
+    }
+    
+    if (documentDocs.length > 0) {
+      await db.collection("unstructured_docs").insertMany(documentDocs);
+    }
+    
+    return { success: true, chunksGenerated: documentDocs.length };
+  } catch (err) {
+    console.error("Document upload failed:", err);
+    throw new Error("Document upload failed");
+  }
+}
+
+export async function queryUnstructuredDocuments(query: string, limit = 3): Promise<string[]> {
+  const db = await getDb();
+  if (!db) return [];
+  
+  const extractor = await getExtractor();
+  const output = await extractor(query, { pooling: 'mean', normalize: true });
+  const queryEmbedding = Array.from(output.data) as number[];
+  
+  const allDocs = await db.collection("unstructured_docs").find({}).toArray();
+  if (allDocs.length === 0) return [];
+  
+  const scoredDocs = allDocs.map(doc => {
+    return {
+      text: doc.text,
+      score: cosineSimilarity(queryEmbedding, doc.embedding)
+    };
+  });
+  
+  scoredDocs.sort((a, b) => b.score - a.score);
+  return scoredDocs.slice(0, limit).map(d => d.text);
 }

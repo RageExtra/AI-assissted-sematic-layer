@@ -8,6 +8,10 @@ import type { DataSourceRecord } from "../shared/governance";
  * The function queries `information_schema` and builds a minimal, portable DDL string.
  */
 export async function generateSchemaSqlFromSource(source: DataSourceRecord): Promise<string> {
+  if (source.provider !== "postgresql") {
+    throw new Error(`Auto-generation is currently only implemented for PostgreSQL. Provider ${source.provider} is not supported.`);
+  }
+
   const connectionString = process.env[source.secretEnvKey];
   if (!connectionString) {
     throw new Error("Missing connection string for the selected data source");

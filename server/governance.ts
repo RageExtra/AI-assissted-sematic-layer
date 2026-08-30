@@ -96,8 +96,8 @@ export async function runEvaluation(input: { datasetId: number; modelLabel: stri
   const cases = await db.listEvaluationCases(dataset.id);
   if (!cases.length) throw new Error("Evaluation dataset has no cases");
   const outcomes = await Promise.all(cases.map(async item => {
-    const run = await buildSemanticQuery(item.question, false, true);
-    const rerun = await buildSemanticQuery(item.question, false, true);
+    const run = await buildSemanticQuery(item.question, true, true);
+    const rerun = await buildSemanticQuery(item.question, true, true);
     let baselinePass = false;
     // SQL execution disabled for MongoDB migration
     // if (run.baseline.sql) {

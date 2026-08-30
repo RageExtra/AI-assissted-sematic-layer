@@ -19,6 +19,45 @@ export const appRouter = router({
       return { success: true } as const;
     }),
   }),
+
+  ai: router({
+    chat: publicProcedure
+      .input(z.object({
+        messages: z.array(z.object({
+          role: z.enum(["system", "user", "assistant"]),
+          content: z.string()
+        }))
+      }))
+      .mutation(async ({ input }) => {
+        const { invokeLLM } = await import("./_core/llm");
+        const { queryUnstructuredDocuments } = await import("./semanticEngine");
+
+        const lastUserMsg = [...input.messages].reverse().find(m => m.role === "user");
+        let contextText = "";
+        
+        if (lastUserMsg) {
+          const matchedDocs = await queryUnstructuredDocuments(lastUserMsg.content, 3);
+          if (matchedDocs.length > 0) {
+            contextText = "\n\n--- Relevant Extracted Document Context ---\n" + matchedDocs.join("\n\n...\n\n") + "\n------------------------------------------";
+          }
+        }
+
+        const augmentedMessages = [...input.messages];
+        if (contextText && augmentedMessages.length > 0) {
+          if (augmentedMessages[0].role === "system") {
+            augmentedMessages[0].content += contextText;
+          } else {
+            augmentedMessages.unshift({ role: "system", content: "You are a helpful AI assistant. Use the following document context to answer the user's questions if relevant." + contextText });
+          }
+        }
+
+        const response = await invokeLLM({
+          messages: augmentedMessages
+        });
+
+        return response;
+      })
+  }),
   semantic: router({
     validate: publicProcedure
       .input(z.any())
@@ -52,6 +91,18 @@ export const appRouter = router({
       .mutation(async ({ input }) => {
         await saveQueryFeedback(input);
         return { success: true } as const;
+      }),
+    uploadDataset: publicProcedure
+      .input(z.object({ name: z.string(), data: z.array(z.any()) }))
+      .mutation(async ({ input }) => {
+        const { handleDatasetUpload } = await import("./semanticEngine");
+        return handleDatasetUpload(input.name, input.data);
+      }),
+    uploadDocument: publicProcedure
+      .input(z.object({ name: z.string(), fileType: z.string(), base64Data: z.string() }))
+      .mutation(async ({ input }) => {
+        const { handleDocumentUpload } = await import("./semanticEngine");
+        return handleDocumentUpload(input.name, input.fileType, input.base64Data);
       }),
   }),
   governance: router({

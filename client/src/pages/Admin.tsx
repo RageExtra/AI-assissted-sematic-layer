@@ -112,6 +112,37 @@ export default function Admin() {
     onError: () => toast.error("Feedback could not be recorded. Please try again."),
   });
 
+  const uploadMutation = trpc.semantic.uploadDataset.useMutation({
+    onSuccess: (data) => toast.success(`Dataset uploaded! Auto-generated ${data.definitionsCreated} semantic definitions.`),
+    onError: () => toast.error("Dataset upload failed."),
+  });
+  
+    const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    if (file.name.endsWith(".pdf") || file.name.endsWith(".txt")) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const base64Data = (event.target?.result as string).split(',')[1];
+        uploadDocMutation.mutate({ name: file.name, fileType: file.type || (file.name.endsWith(".pdf") ? "application/pdf" : "text/plain"), base64Data });
+      };
+      reader.readAsDataURL(file);
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const json = JSON.parse(event.target?.result as string);
+        uploadMutation.mutate({ name: file.name.replace(".json", ""), data: json });
+      } catch (err) {
+        toast.error("Invalid file. Please upload a JSON array or a PDF/TXT document.");
+      }
+    };
+    reader.readAsText(file);
+  };
+
   useEffect(() => {
     if (demoQuery.data && !activeRun) setActiveRun(demoQuery.data);
   }, [activeRun, demoQuery.data]);
@@ -274,9 +305,14 @@ export default function Admin() {
                     ))}
                   </div>
                   <div className="flex gap-2">
-                    <Button variant="outline" onClick={() => toast.info("Unstructured File RAG feature coming soon. Please contact an admin to set up the Vector Database. You will soon be able to upload PDFs, Docs, and Spreadsheets to combine structured and unstructured search.")} className="h-9 gap-2 rounded-lg px-3 text-xs shadow-none border-[#cfdcd5] text-[#53636b] hover:bg-[#eef2ef] hover:text-[#183347]">
-                      <Paperclip className="size-3.5" /> Attach File
-                    </Button>
+                  <div>
+                    <input type="file" id="file-upload-admin" accept=".json,.pdf,.txt" className="hidden" onChange={handleFileUpload} />
+                    <label htmlFor="file-upload-admin">
+                      <div className="inline-flex items-center justify-center whitespace-nowrap h-9 gap-2 rounded-lg px-3 text-xs shadow-none border border-[#cfdcd5] text-[#53636b] hover:bg-[#eef2ef] hover:text-[#183347] cursor-pointer">
+                        {(uploadMutation.isPending || uploadDocMutation.isPending) ? <LoaderCircle className="size-3.5 animate-spin" /> : <Paperclip className="size-3.5" />} Attach File
+                      </div>
+                    </label>
+                  </div>
                     <Button onClick={() => runQuestion()} disabled={queryMutation.isPending} className="h-9 gap-2 rounded-lg bg-[#183347] px-4 text-xs shadow-none transition-transform active:scale-[0.97] hover:bg-[#25495e]">
                       {queryMutation.isPending ? <LoaderCircle className="size-3.5 animate-spin" /> : <Send className="size-3.5" />} Run grounded query
                     </Button>

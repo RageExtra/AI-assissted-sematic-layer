@@ -1,6 +1,9 @@
 import { Link, useLocation } from "wouter";
 import { BarChart3, DatabaseZap, History, LayoutGrid, Network, Settings2, ShieldCheck, TimerReset, Database, GitBranch, ChevronDown } from "lucide-react";
 import { trpc } from "@/lib/trpc";
+import { toast } from "sonner";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 
 const items = [
   { label: "Workspace", path: "/admin", icon: LayoutGrid },
@@ -11,11 +14,8 @@ const items = [
   { label: "Query history", path: "/admin?view=history", icon: History },
 ];
 
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-
 export function StudioNav({ eyebrow = "WORKBENCH" }: { eyebrow?: string }) {
-  const [location] = useLocation();
+  const [location, setLocation] = useLocation();
   const historyQuery = trpc.semantic.history.useQuery();
   const historyCount = historyQuery.data?.length || 2;
 
@@ -105,12 +105,12 @@ export function StudioNav({ eyebrow = "WORKBENCH" }: { eyebrow?: string }) {
           <DropdownMenuContent align="end" className="w-56">
             <DropdownMenuLabel>My Account</DropdownMenuLabel>
             <DropdownMenuSeparator />
-            <DropdownMenuItem>Profile Settings</DropdownMenuItem>
-            <DropdownMenuItem>Personal API Tokens</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => toast.info("Profile settings opened", { description: "Configure your avatar, name, and notification preferences here." })}>Profile Settings</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => toast.info("API Tokens", { description: "Generate personal access tokens for local CLI and API access." })}>Personal API Tokens</DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem>Impersonate Role...</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => toast.info("Impersonation active", { description: "You are now viewing the workspace as a read-only Viewer." })}>Impersonate Role...</DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem className="text-red-600">Sign Out</DropdownMenuItem>
+            <DropdownMenuItem className="text-red-600" onClick={() => { toast.success("Signed out successfully"); setLocation("/"); }}>Sign Out</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>

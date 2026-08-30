@@ -15,6 +15,8 @@ export async function getMongoClient() {
       _db = _client.db(); // Uses the default DB in connection string
     } catch (error) {
       console.warn("[Database] Failed to connect to MongoDB:", error);
+      _client = null;
+      _db = null;
     }
   }
   return _client;
@@ -36,8 +38,6 @@ export async function upsertUser(user: Partial<User> & { openId: string }): Prom
   if (!db) return;
   
   const existing = await db.collection("users").findOne({ openId: user.openId });
-  const role = "admin";
-  const stewardRole = "approver";
 
   if (existing) {
     await db.collection("users").updateOne({ openId: user.openId }, {
@@ -45,9 +45,7 @@ export async function upsertUser(user: Partial<User> & { openId: string }): Prom
         name: user.name ?? existing.name,
         email: user.email ?? existing.email,
         loginMethod: user.loginMethod ?? existing.loginMethod,
-        lastSignedIn: user.lastSignedIn ?? new Date(),
-        role,
-        stewardRole
+        lastSignedIn: user.lastSignedIn ?? new Date()
       }
     });
   } else {
@@ -60,8 +58,8 @@ export async function upsertUser(user: Partial<User> & { openId: string }): Prom
       lastSignedIn: user.lastSignedIn ?? new Date(),
       createdAt: new Date(),
       updatedAt: new Date(),
-      role,
-      stewardRole
+      role: "admin",
+      stewardRole: "approver"
     });
   }
 }
@@ -520,7 +518,7 @@ export async function getRelevantDefinitions(question: string): Promise<Semantic
   // Lightweight Hybrid RAG keyword filtering
   // If no specific keywords match, we return a core subset to prevent context bloat
   const filtered = all.filter(def => {
-    const term = def.term.toLowerCase();
+    const term = def.name.toLowerCase();
     const desc = def.description.toLowerCase();
     
     // Split question into words and check if any significant word matches

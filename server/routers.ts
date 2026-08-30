@@ -20,6 +20,12 @@ export const appRouter = router({
     }),
   }),
   semantic: router({
+    validate: publicProcedure
+      .input(z.any())
+      .mutation(async ({ input }) => {
+        const { validateInterpretation } = await import("./validation");
+        return validateInterpretation(input);
+      }),
     demo: publicProcedure.query(() => getDemoQuery()),
     run: publicProcedure
       .input(z.object({ question: z.string().trim().min(3).max(500), useLlm: z.boolean().optional() }))

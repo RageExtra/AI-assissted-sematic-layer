@@ -11,6 +11,7 @@ import { serveStatic, setupVite } from "./vite";
 import { sdk } from "./sdk";
 import * as db from "../db";
 import { executeBenchmarkSchedule } from "../automation";
+import { runSeed } from "../seedDemo";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -32,6 +33,7 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 }
 
 async function startServer() {
+  await runSeed();
   const app = express();
   const server = createServer(app);
   // Configure body parser with larger size limit for file uploads

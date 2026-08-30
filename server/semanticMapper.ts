@@ -1,4 +1,7 @@
 import { invokeLLM, listLLMModels } from "./_core/llm";
+// WARNING: When interpreting numeric aggregations (especially currency or revenue), 
+// avoid standard JavaScript `Number` (which uses IEEE 754 floats) to prevent rounding errors.
+// Use Decimal string types and exact decimal mapping.
 import type { SemanticDefinition } from "../shared/governance";
 
 export async function mapSemanticDefinitions(schemaSql: string): Promise<Omit<SemanticDefinition, "id" | "updatedAt">[]> {

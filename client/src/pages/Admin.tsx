@@ -15,7 +15,7 @@ import {
   CircleHelp,
   Clock3,
   Copy,
-  Database,
+  DatabaseZap, TimerReset,
   FileSearch,
   GitBranch,
   History,
@@ -38,7 +38,9 @@ import { useEffect, useState } from "react";
 import { useLocation } from "wouter";
 import { toast } from "sonner";
 
-type ViewName = "Workspace" | "Semantic model" | "Query history" | "Evaluation";
+import { DatabaseZap, TimerReset } from "lucide-react";
+
+type ViewName = "Workspace" | "Semantic model" | "Query history" | "Evaluation" | "Data connections" | "Automation";
 
 const suggestions = [
   "What were our revenue and orders by region in the last quarter?",
@@ -47,11 +49,13 @@ const suggestions = [
   "Show performance",
 ];
 
-const navigation: Array<{ label: ViewName; icon: typeof LayoutGrid; path?: string }> = [
+const navigation: Array<{ label: ViewName; icon: any; path?: string }> = [
   { label: "Workspace", icon: LayoutGrid },
+  { label: "Data connections", icon: DatabaseZap, path: "/connections" },
   { label: "Semantic model", icon: Network, path: "/governance" },
-  { label: "Query history", icon: History },
   { label: "Evaluation", icon: BarChart3, path: "/evaluation" },
+  { label: "Automation", icon: TimerReset, path: "/automation" },
+  { label: "Query history", icon: History },
 ];
 
 function ConfidencePill({ value, label = "confidence" }: { value: number; label?: string }) {

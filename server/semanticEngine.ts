@@ -2,6 +2,7 @@ import { invokeLLM, listLLMModels } from "./_core/llm";
 import type { GroundingItem, QueryIntent, SemanticQueryRun, SqlSafety } from "../shared/semantic";
 import { getDb } from "./db";
 import { ensureDemoCommerceData } from "./demoData";
+import { validateInterpretation } from "./validation";
 
 type PlanTemplate = {
   id: "region" | "customers" | "trend" | "clarify";
@@ -228,8 +229,9 @@ ORDER BY month ASC;`,
       detected: true,
       explanation: "The request does not specify a governed performance metric or the desired comparison grain.",
       questions: [
-        "Which measure should define performance: completed revenue, order count, or average order value?",
-        "Should the comparison be by region, product category, customer, or month?",
+        "Show completed revenue by region",
+        "Show completed revenue by month",
+        "Show top customers by completed revenue"
       ],
     },
   },
@@ -283,7 +285,7 @@ async function interpretWithLLM(question: string): Promise<LlmInterpretation | u
       messages: [
         {
           role: "system",
-          content: "You interpret business questions for a governed semantic layer. Never write SQL. Return only the requested JSON using the supplied vocabulary: entities Order, Customer, Calendar, Region; metric Completed Revenue; dimensions Customer Region, Customer, Month. Flag ambiguity only when metric or grain cannot be reasonably grounded.",
+          content: "You interpret business questions for a governed semantic layer. Never write SQL. Return only the requested JSON using the supplied vocabulary: entities Order, Customer, Calendar, Region; metric Completed Revenue; dimensions Customer Region, Customer, Month. You MUST return numeric values as strings representing exact decimals (e.g. \"100.00\", no floating-point). If the request is ambiguous or does not explicitly map to the provided metric and dimensions, you MUST flag ambiguity and provide a clarification note.",
         },
         { role: "user", content: question },
       ],
@@ -310,7 +312,20 @@ async function interpretWithLLM(question: string): Promise<LlmInterpretation | u
     });
     const content = response.choices[0]?.message.content;
     if (typeof content !== "string") return undefined;
-    return JSON.parse(content) as LlmInterpretation;
+    const parsed = JSON.parse(content) as LlmInterpretation;
+    const validation = validateInterpretation(parsed);
+    if (!validation.ok) {
+      console.warn("[SemanticLayer] LLM interpretation failed validation:", validation.errors);
+      return {
+        intent: "clarification",
+        entities: [],
+        metric: "Unresolved",
+        dimension: "Unresolved",
+        ambiguity: true,
+        note: `Validation failed: ${validation.errors?.join(", ")}`,
+      };
+    }
+    return parsed;
   } catch (error) {
     console.warn("[SemanticLayer] LLM interpretation unavailable; using governed deterministic fallback.", error);
     return undefined;

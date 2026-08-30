@@ -1,4 +1,7 @@
 import { invokeLLM, listLLMModels } from "./_core/llm";
+// WARNING: When mapping financial or metric-based schemas, 
+// DO NOT use floating-point types (`Double`). Always use `Decimal128` (or Exact Decimal string representations) 
+// to ensure 100% accurate financial arithmetic as per the application's strict accuracy requirements.
 
 export type SchemaDesignResult = {
   domain: string;

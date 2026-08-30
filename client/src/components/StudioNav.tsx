@@ -2,7 +2,7 @@ import { Link, useLocation } from "wouter";
 import { BarChart3, DatabaseZap, History, LayoutGrid, Network, Settings2, ShieldCheck, TimerReset } from "lucide-react";
 
 const items = [
-  { label: "Workspace", path: "/", icon: LayoutGrid },
+  { label: "Workspace", path: "/admin", icon: LayoutGrid },
   { label: "Data connections", path: "/connections", icon: DatabaseZap },
   { label: "Semantic governance", path: "/governance", icon: Network },
   { label: "Evaluation lab", path: "/evaluation", icon: BarChart3 },
@@ -14,10 +14,17 @@ export function StudioNav({ eyebrow = "CONTROL PLANE" }: { eyebrow?: string }) {
   const [location] = useLocation();
   return (
     <aside className="hidden min-h-screen w-[244px] shrink-0 flex-col bg-[#102130] px-4 py-5 text-[#dfe8e4] lg:flex">
-      <Link href="/" className="flex items-center gap-3 px-2">
-        <span className="grid size-9 place-items-center rounded-xl bg-[#dff0e6] text-[#143f31] shadow-[0_8px_22px_rgba(0,0,0,0.18)]"><Network className="size-5" strokeWidth={2.25} /></span>
-        <span><span className="block text-sm font-semibold tracking-tight text-white">semantic</span><span className="-mt-0.5 block text-[10px] tracking-[0.16em] text-[#8fa79e]">LAYER STUDIO</span></span>
-      </Link>
+      {location === "/admin" ? (
+        <div className="flex items-center gap-3 px-2">
+          <span className="grid size-9 place-items-center rounded-xl bg-[#dff0e6] text-[#143f31] shadow-[0_8px_22px_rgba(0,0,0,0.18)]"><Network className="size-5" strokeWidth={2.25} /></span>
+          <span><span className="block text-sm font-semibold tracking-tight text-white">semantic</span><span className="-mt-0.5 block text-[10px] tracking-[0.16em] text-[#8fa79e]">LAYER STUDIO</span></span>
+        </div>
+      ) : (
+        <Link href="/admin" className="flex items-center gap-3 px-2">
+          <span className="grid size-9 place-items-center rounded-xl bg-[#dff0e6] text-[#143f31] shadow-[0_8px_22px_rgba(0,0,0,0.18)]"><Network className="size-5" strokeWidth={2.25} /></span>
+          <span><span className="block text-sm font-semibold tracking-tight text-white">semantic</span><span className="-mt-0.5 block text-[10px] tracking-[0.16em] text-[#8fa79e]">LAYER STUDIO</span></span>
+        </Link>
+      )}
       <div className="mt-10 px-2"><p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#72877f]">{eyebrow}</p></div>
       <nav className="mt-3 space-y-1">
         {items.map(({ label, path, icon: Icon }) => {

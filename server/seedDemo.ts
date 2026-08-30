@@ -1,0 +1,16 @@
+import { ensureDemoCommerceData } from "./demoData";
+
+export async function runSeed() {
+  console.log("[Seeder] Starting demo commerce data seeding...");
+  try {
+    await ensureDemoCommerceData();
+    console.log("[Seeder] Demo commerce data seeded successfully.");
+  } catch (error) {
+    console.error("[Seeder] Error seeding demo commerce data:", error);
+  }
+}
+
+// Allow running directly
+if (require.main === module) {
+  runSeed().then(() => process.exit(0)).catch(() => process.exit(1));
+}

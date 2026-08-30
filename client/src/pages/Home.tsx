@@ -190,7 +190,7 @@ export default function Home() {
                   {activeRun.ambiguity.detected && (
                     <div className="mt-5 rounded-xl border border-[#edd7a7] bg-[#fff9eb] p-4">
                       <div className="flex gap-2.5"><CircleHelp className="mt-0.5 size-4 shrink-0 text-[#a66c16]" /><div><p className="text-sm font-semibold text-[#744b12]">A clarification is needed before execution.</p><p className="mt-1 text-xs leading-5 text-[#8b651e]">{activeRun.ambiguity.explanation}</p></div></div>
-                      <div className="mt-3 flex flex-wrap gap-2">{activeRun.ambiguity.questions.map(item => <button key={item} onClick={() => setQuestion(item)} className="rounded-md border border-[#ead6a7] bg-white px-2.5 py-1.5 text-left text-[11px] text-[#74531c] hover:bg-[#fffdf6]">{item}</button>)}</div>
+                      <div className="mt-3 flex flex-wrap gap-2">{activeRun.ambiguity.questions.map(item => <button key={item} onClick={() => { setQuestion(item); runQuestion(item); }} className="rounded-md border border-[#ead6a7] bg-white px-2.5 py-1.5 text-left text-[11px] text-[#74531c] hover:bg-[#fffdf6]">{item}</button>)}</div>
                     </div>
                   )}
 

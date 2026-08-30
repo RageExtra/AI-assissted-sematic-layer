@@ -24,6 +24,7 @@ import {
   LoaderCircle,
   Network,
   PanelRight,
+  Paperclip,
   Search,
   Send,
   Settings2,

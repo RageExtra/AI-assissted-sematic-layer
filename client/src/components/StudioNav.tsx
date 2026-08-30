@@ -11,6 +11,9 @@ const items = [
   { label: "Query history", path: "/admin?view=history", icon: History },
 ];
 
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+
 export function StudioNav({ eyebrow = "WORKBENCH" }: { eyebrow?: string }) {
   const [location] = useLocation();
   const historyQuery = trpc.semantic.history.useQuery();
@@ -69,12 +72,47 @@ export function StudioNav({ eyebrow = "WORKBENCH" }: { eyebrow?: string }) {
       </div>
 
       <div className="mt-auto border-t border-[#2a4555] pt-5">
-        <button className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm text-[#a9bbb5] transition-colors hover:bg-[#193244] hover:text-white"><Settings2 className="size-4" /> Workspace settings</button>
-        <div className="mt-4 flex items-center gap-2.5 px-3">
-          <div className="grid size-7 place-items-center rounded-full bg-[#d8c3a5] text-[10px] font-bold text-[#654e37]">AC</div>
-          <div><p className="text-xs font-medium text-white">Alex Chen</p><p className="text-[10px] text-[#8fa79e]">Data steward</p></div>
-          <ChevronDown className="ml-auto size-3.5 text-[#8fa79e]" />
-        </div>
+        <Dialog>
+          <DialogTrigger asChild>
+            <button className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm text-[#a9bbb5] transition-colors hover:bg-[#193244] hover:text-white">
+              <Settings2 className="size-4" /> Workspace settings
+            </button>
+          </DialogTrigger>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Workspace Settings</DialogTitle>
+              <DialogDescription>
+                Configure global settings for this Semantic Layer workspace.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-4 py-4 text-sm text-[#49606a]">
+              <p>• <strong>Team Management:</strong> Invite Data Stewards or Analytics Engineers and configure SSO.</p>
+              <p>• <strong>LLM Configuration:</strong> Switch between Groq, OpenAI, and internal models for the query compilation engine.</p>
+              <p>• <strong>Caching & Performance:</strong> Set default TTLs for the exact-match AST query cache.</p>
+              <p>• <strong>API Keys:</strong> Generate secure tokens for BI tool integration (e.g. Tableau, Looker).</p>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <div className="mt-4 flex cursor-pointer items-center gap-2.5 px-3 hover:bg-[#193244] py-2 rounded-xl transition-colors">
+              <div className="grid size-7 place-items-center rounded-full bg-[#d8c3a5] text-[10px] font-bold text-[#654e37]">AC</div>
+              <div><p className="text-xs font-medium text-white">Alex Chen</p><p className="text-[10px] text-[#8fa79e]">Data steward</p></div>
+              <ChevronDown className="ml-auto size-3.5 text-[#8fa79e]" />
+            </div>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-56">
+            <DropdownMenuLabel>My Account</DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem>Profile Settings</DropdownMenuItem>
+            <DropdownMenuItem>Personal API Tokens</DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem>Impersonate Role...</DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem className="text-red-600">Sign Out</DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
     </aside>
   );

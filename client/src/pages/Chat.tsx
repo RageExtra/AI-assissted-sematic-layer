@@ -4,7 +4,7 @@ import { Network } from "lucide-react";
 import { useEffect, useState, type ChangeEvent } from "react";
 import { toast } from "sonner";
 
-const MAX_FILE_BYTES = 10 * 1024 * 1024;
+const MAX_FILE_BYTES = 25 * 1024 * 1024;
 
 function parseDelimited(text: string, delimiter: "," | "\t") {
   const rows: string[][] = [];
@@ -92,32 +92,32 @@ export default function Chat() {
     const file = event.target.files?.[0];
     event.target.value = "";
     if (!file) return;
-    if (file.size > MAX_FILE_BYTES) { toast.error("Files are limited to 10 MB."); return; }
+    if (file.size > MAX_FILE_BYTES) { toast.error("Files are limited to 25 MB."); return; }
     const lowerName = file.name.toLowerCase();
 
-    if (lowerName.endsWith(".pdf") || lowerName.endsWith(".txt")) {
+    if (lowerName.endsWith(".json") || lowerName.endsWith(".csv") || lowerName.endsWith(".tsv")) {
       const reader = new FileReader();
       reader.onload = () => {
-        const result = String(reader.result ?? "");
-        const base64Data = result.includes(",") ? result.split(",", 2)[1] : result;
-        uploadDocumentMutation.mutate({ name: file.name, fileType: lowerName.endsWith(".pdf") ? "application/pdf" : "text/plain", base64Data });
+        try {
+          const raw = String(reader.result ?? "");
+          const data = lowerName.endsWith(".json") ? JSON.parse(raw) : parseDelimited(raw, lowerName.endsWith(".tsv") ? "\t" : ",");
+          if (!Array.isArray(data)) throw new Error("JSON must contain an array of row objects.");
+          uploadMutation.mutate({ name: file.name, data });
+        } catch (error) {
+          toast.error(error instanceof Error ? error.message : "Could not parse the file.");
+        }
       };
-      reader.readAsDataURL(file);
+      reader.readAsText(file);
       return;
     }
 
     const reader = new FileReader();
     reader.onload = () => {
-      try {
-        const raw = String(reader.result ?? "");
-        const data = lowerName.endsWith(".json") ? JSON.parse(raw) : parseDelimited(raw, lowerName.endsWith(".tsv") ? "\t" : ",");
-        if (!Array.isArray(data)) throw new Error("JSON must contain an array of row objects.");
-        uploadMutation.mutate({ name: file.name, data });
-      } catch (error) {
-        toast.error(error instanceof Error ? error.message : "Could not parse the file.");
-      }
+      const result = String(reader.result ?? "");
+      const base64Data = result.includes(",") ? result.split(",", 2)[1] : result;
+      uploadDocumentMutation.mutate({ name: file.name, fileType: file.type || "application/octet-stream", base64Data });
     };
-    reader.readAsText(file);
+    reader.readAsDataURL(file);
   };
 
   const handleSendMessage = (content: string) => {

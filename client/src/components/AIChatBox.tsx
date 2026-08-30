@@ -314,7 +314,7 @@ export function AIChatBox({
       >
         {onFileUpload && (
           <div className="shrink-0 flex items-center justify-center">
-            <input type="file" id="chat-file-upload" accept=".json,.csv,.tsv,.pdf,.txt" className="hidden" onChange={onFileUpload} disabled={isUploadingFile} />
+            <input type="file" id="chat-file-upload" accept="*/*" className="hidden" onChange={onFileUpload} disabled={isUploadingFile} />
             <label htmlFor="chat-file-upload">
               <Button type="button" variant="outline" size="icon" className="h-[38px] w-[38px] cursor-pointer" disabled={isUploadingFile} asChild>
                 <span>

@@ -75,7 +75,7 @@ export const appRouter = router({
       .input(z.object({ jobId: z.string().uuid() }))
       .query(({ input }) => getDatasetJob(input.jobId)),
     uploadDocument: publicProcedure
-      .input(z.object({ name: z.string().trim().min(1).max(160), fileType: z.enum(["application/pdf", "text/plain"]), base64Data: z.string().min(1).max(14_000_000) }))
+      .input(z.object({ name: z.string().trim().min(1).max(240), fileType: z.string().trim().max(160), base64Data: z.string().min(1).max(28_000_000) }))
       .mutation(async ({ input }) => {
         try {
           console.log("[TRPC] Starting document upload:", input.name, input.fileType, "size:", input.base64Data.length);

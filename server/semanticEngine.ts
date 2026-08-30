@@ -644,14 +644,28 @@ export async function handleDocumentUpload(name: string, fileType: string, base6
     const buffer = Buffer.from(base64Data, 'base64');
     let text = "";
     
-    if (fileType === "application/pdf") {
+    const lowerName = name.toLowerCase();
+    if (fileType === "application/pdf" || lowerName.endsWith(".pdf")) {
       const { PDFParse } = await import("pdf-parse");
       const parser = new PDFParse({ data: buffer });
       const data = await parser.getText();
       await parser.destroy();
       text = data.text;
-    } else {
+    } else if (fileType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" || lowerName.endsWith(".docx")) {
+      const mammoth = await import("mammoth");
+      const data = await mammoth.extractRawText({ buffer });
+      text = data.value;
+    } else if (fileType.includes("spreadsheet") || fileType.includes("excel") || lowerName.endsWith(".xlsx") || lowerName.endsWith(".xls")) {
+      const XLSX = await import("xlsx");
+      const workbook = XLSX.read(buffer, { type: "buffer", cellDates: true });
+      text = workbook.SheetNames.map(sheetName => {
+        const sheet = workbook.Sheets[sheetName];
+        return `Sheet: ${sheetName}\\n${XLSX.utils.sheet_to_csv(sheet)}`;
+      }).join("\\n\\n");
+    } else if (fileType.startsWith("text/") || /\\.(txt|md|csv|tsv|json|xml|html|log|yaml|yml)$/i.test(lowerName)) {
       text = buffer.toString("utf8");
+    } else {
+      text = `Attachment metadata: ${name}. MIME type: ${fileType || "unknown"}. This binary attachment was accepted and stored, but no text extractor is configured for its contents yet.`;
     }
     
     text = text.replace(/\u0000/g, "").trim();

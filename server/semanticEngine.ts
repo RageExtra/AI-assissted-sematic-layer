@@ -1,6 +1,6 @@
 import { invokeLLM, listLLMModels } from "./_core/llm";
 import type { GroundingItem, QueryIntent, SemanticQueryRun, SqlSafety } from "../shared/semantic";
-import { getDb, listDefinitions } from "./db";
+import { getDb, listDefinitions, getRelevantDefinitions, createDraftDefinition } from "./db";
 import { ensureDemoCommerceData } from "./demoData";
 import { validateInterpretation } from "./validation";
 import { getCachedQuery, cacheQuery } from "./cache";
@@ -280,8 +280,8 @@ type LlmInterpretation = {
 
 async function interpretWithLLM(question: string): Promise<LlmInterpretation | undefined> {
   try {
-    const definitions = await listDefinitions();
-    const defContext = definitions.map(d => `- ${d.kind.toUpperCase()} "${d.name}": ${d.description} (Aliases: ${d.aliases.join(", ")})`).join("\n");
+    const definitions = await getRelevantDefinitions(question);
+    const defContext = definitions.map((d: any) => `- ${d.kind.toUpperCase()} "${d.term || d.name}": ${d.description} (Aliases: ${(d.aliases || []).join(", ")})`).join("\n");
 
     const models = await listLLMModels();
     const model = models.data.find(candidate => candidate.id === "gpt-5-mini" || candidate.id.includes("gpt-4") || candidate.id.includes("llama")) ?? models.data[0];
@@ -297,8 +297,10 @@ async function interpretWithLLM(question: string): Promise<LlmInterpretation | u
 You extract the intent, entities, metric, and dimension based ONLY on the following approved definitions:
 ${defContext}
 
-You do not write database code. You return an Abstract Syntax Tree (AST) representing the user's intent. 
-If the request is ambiguous or does not explicitly map to the provided metric and dimensions, you MUST flag ambiguity and provide a clarification note.`,
+CRITICAL RULES:
+1. PROACTIVE DISAMBIGUATION: If the user's question uses ambiguous terms (e.g. "sales" instead of "Completed Revenue") and matches multiple definitions, you MUST return ambiguity: true and put clarification questions in the note.
+2. AUTO-GOVERNANCE (Orphan Intents): If the user asks for a clear metric or dimension that is NOT in the definitions above, do not hallucinate. Set intent to "propose_definition" and set the metric/dimension fields to what they asked for.
+3. You do not write database code. You return an Abstract Syntax Tree (AST) representing the user's intent.`,
         },
         { role: "user", content: question },
       ],
@@ -310,7 +312,7 @@ If the request is ambiguous or does not explicitly map to the provided metric an
           schema: {
             type: "object",
             properties: {
-              intent: { type: "string", enum: ["aggregation", "ranking", "trend", "clarification"] },
+              intent: { type: "string", enum: ["aggregation", "ranking", "trend", "clarification", "propose_definition"] },
               entities: { type: "array", items: { type: "string" } },
               metric: { type: "string" },
               dimension: { type: "string" },
@@ -326,8 +328,17 @@ If the request is ambiguous or does not explicitly map to the provided metric an
     const content = response.choices[0]?.message.content;
     if (typeof content !== "string") return undefined;
     const parsed = JSON.parse(content) as LlmInterpretation;
+    
+    // Feature 1: Auto-Governance
+    if (parsed.intent === "propose_definition" && parsed.metric && parsed.metric !== "Unresolved") {
+       await createDraftDefinition(parsed.metric, `Drafted by AI Semantic Engine based on query: ${question}`);
+       parsed.ambiguity = true;
+       parsed.note = `The metric '${parsed.metric}' is not governed in the Semantic Layer. A draft concept has been submitted to the Data Steward for approval.`;
+       return parsed;
+    }
+
     const validation = validateInterpretation(parsed);
-    if (!validation.ok) {
+    if (!validation.ok && parsed.intent !== "propose_definition") {
       console.warn("[SemanticLayer] LLM interpretation failed validation:", validation.errors);
       return {
         intent: "clarification",
@@ -501,4 +512,25 @@ export async function getDemoHistory(): Promise<SemanticQueryRun[]> {
     "Show the monthly revenue trend for the last six months.",
   ];
   return Promise.all(questions.map(question => buildSemanticQuery(question, false, true)));
+}
+export function startCachePreWarming() {
+  console.log("[SemanticLayer] Initializing predictive cache pre-warming cron task...");
+  // Simulate running a pre-warm every hour by starting it on boot
+  setInterval(async () => {
+    console.log("[SemanticLayer] Running predictive cache pre-warming...");
+    try {
+      // Prewarm common questions
+      const commonQuestions = [
+        "What is our completed revenue?",
+        "Show completed revenue by region",
+        "Which customers generate the most completed revenue?"
+      ];
+      for (const q of commonQuestions) {
+        await buildSemanticQuery(q, true, false); // Don't execute demo against actual DB for cron, just compile AST
+      }
+      console.log("[SemanticLayer] Predictive cache pre-warming complete.");
+    } catch (e) {
+      console.error("[SemanticLayer] Pre-warming failed:", e);
+    }
+  }, 1000 * 60 * 60); // 1 hour
 }

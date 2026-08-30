@@ -12,6 +12,7 @@ import { sdk } from "./sdk";
 import * as db from "../db";
 import { executeBenchmarkSchedule } from "../automation";
 import { runSeed } from "../seedDemo";
+import { startCachePreWarming } from "../semanticEngine";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -34,6 +35,7 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 
 async function startServer() {
   await runSeed();
+  startCachePreWarming();
   const app = express();
   const server = createServer(app);
   // Configure body parser with larger size limit for file uploads

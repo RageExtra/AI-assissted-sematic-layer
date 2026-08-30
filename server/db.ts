@@ -512,3 +512,35 @@ export async function createCollection(name: string, schema?: object, indexes?: 
     }
   }
 }
+
+export async function getRelevantDefinitions(question: string): Promise<SemanticDefinition[]> {
+  const all = await listDefinitions();
+  const q = question.toLowerCase();
+  
+  // Lightweight Hybrid RAG keyword filtering
+  // If no specific keywords match, we return a core subset to prevent context bloat
+  const filtered = all.filter(def => {
+    const term = def.term.toLowerCase();
+    const desc = def.description.toLowerCase();
+    
+    // Split question into words and check if any significant word matches
+    const words = q.split(/\W+/).filter(w => w.length > 3);
+    const matches = words.some(w => term.includes(w) || desc.includes(w));
+    
+    return matches || term.includes("revenue") || term.includes("customer"); 
+  });
+  
+  return filtered.length > 0 ? filtered : all.slice(0, 5);
+}
+
+export async function createDraftDefinition(term: string, description: string): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.collection("draftDefinitions").insertOne({
+    id: generateId(),
+    term,
+    description,
+    status: "pending",
+    createdAt: new Date().toISOString()
+  });
+}

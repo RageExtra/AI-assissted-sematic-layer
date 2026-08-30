@@ -1,4 +1,4 @@
-export type QueryIntent = "aggregation" | "ranking" | "trend" | "clarification";
+export type QueryIntent = "aggregation" | "ranking" | "trend" | "clarification" | "propose_definition";
 
 export type GroundingItem = {
   kind: "entity" | "metric" | "dimension" | "relationship" | "alias" | "business_rule";

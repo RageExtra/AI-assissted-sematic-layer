@@ -10,7 +10,3 @@ export async function runSeed() {
   }
 }
 
-// Allow running directly
-if (require.main === module) {
-  runSeed().then(() => process.exit(0)).catch(() => process.exit(1));
-}

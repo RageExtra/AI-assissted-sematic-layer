@@ -1,8 +1,11 @@
 import { invokeLLM, listLLMModels } from "./_core/llm";
 import type { GroundingItem, QueryIntent, SemanticQueryRun, SqlSafety } from "../shared/semantic";
-import { getDb } from "./db";
+import { getDb, listDefinitions } from "./db";
 import { ensureDemoCommerceData } from "./demoData";
 import { validateInterpretation } from "./validation";
+import { getCachedQuery, cacheQuery } from "./cache";
+import { validateMQL } from "./mqlValidator";
+import { compileASTtoMQL } from "./mqlCompiler";
 
 type PlanTemplate = {
   id: "region" | "customers" | "trend" | "clarify";
@@ -277,22 +280,24 @@ type LlmInterpretation = {
 
 async function interpretWithLLM(question: string): Promise<LlmInterpretation | undefined> {
   try {
+    const definitions = await listDefinitions();
+    const defContext = definitions.map(d => `- ${d.kind.toUpperCase()} "${d.name}": ${d.description} (Aliases: ${d.aliases.join(", ")})`).join("\n");
+
     const models = await listLLMModels();
     const model = models.data.find(candidate => candidate.id === "gpt-5-mini" || candidate.id.includes("gpt-4") || candidate.id.includes("llama")) ?? models.data[0];
     if (!model) return undefined;
 
     const response = await invokeLLM({
       model: model.id,
-      maxTokens: 1000,
+      maxTokens: 500,
       messages: [
         {
           role: "system",
           content: `You interpret business questions for a semantic layer backed by MongoDB. 
-You must generate a MongoDB aggregation pipeline array (as a JSON array of objects) for the "orders" collection. 
-The "orders" collection has { orderId, customerId, amount (as exact string decimals e.g. "50.00"), orderStatus, orderDate }. 
-The "customers" collection (which you can $lookup with localField: "customerId", foreignField: "customerId") has { customerId, customerName, region }.
-For 'Completed Revenue', filter by orderStatus = 'completed' and sum the numeric value of 'amount' (you may need to convert string to double in the pipeline using $toDouble, e.g. { $sum: { $toDouble: "$amount" } }).
-Return the pipeline as "mql" and a list of friendly column names as "columns".
+You extract the intent, entities, metric, and dimension based ONLY on the following approved definitions:
+${defContext}
+
+You do not write database code. You return an Abstract Syntax Tree (AST) representing the user's intent. 
 If the request is ambiguous or does not explicitly map to the provided metric and dimensions, you MUST flag ambiguity and provide a clarification note.`,
         },
         { role: "user", content: question },
@@ -310,11 +315,9 @@ If the request is ambiguous or does not explicitly map to the provided metric an
               metric: { type: "string" },
               dimension: { type: "string" },
               ambiguity: { type: "boolean" },
-              note: { type: "string" },
-              mql: { type: "array", items: { type: "object", additionalProperties: true } },
-              columns: { type: "array", items: { type: "string" } },
+              note: { type: "string" }
             },
-            required: ["intent", "entities", "metric", "dimension", "ambiguity", "note", "mql", "columns"],
+            required: ["intent", "entities", "metric", "dimension", "ambiguity", "note"],
             additionalProperties: false,
           },
         },
@@ -384,6 +387,12 @@ function resultFromExecution(template: PlanTemplate, rows: DatabaseRecord[]): Se
 
 async function executeGovernedDemoQuery(template: PlanTemplate, safety: SqlSafety, llm?: LlmInterpretation): Promise<SemanticQueryRun["result"]> {
   if (llm?.mql && llm.mql.length > 0 && !llm.ambiguity) {
+    const mqlValidation = validateMQL(llm.mql);
+    if (!mqlValidation.ok) {
+      console.warn("[SemanticLayer] MQL Validation failed:", mqlValidation.errors);
+      return { columns: [], rows: [], summary: "MQL Security Violation: " + mqlValidation.errors?.join(", ") };
+    }
+
     try {
       const db = await getDb();
       if (db) {
@@ -403,11 +412,11 @@ async function executeGovernedDemoQuery(template: PlanTemplate, safety: SqlSafet
             }
             return out;
           }),
-          summary: `Dynamic MQL Execution · ${rows.length} rows returned`
+          summary: `Dynamic AST Compilation Execution · ${rows.length} rows returned`
         };
       }
     } catch (e) {
-      console.warn("[SemanticLayer] Dynamic MQL execution failed:", e);
+      console.warn("[SemanticLayer] Dynamic AST execution failed:", e);
     }
   }
   return template.result;
@@ -415,7 +424,26 @@ async function executeGovernedDemoQuery(template: PlanTemplate, safety: SqlSafet
 
 export async function buildSemanticQuery(question: string, useLlm = true, executeDemo = false): Promise<SemanticQueryRun> {
   const template = chooseTemplate(question);
-  const llm = useLlm ? await interpretWithLLM(question) : undefined;
+  
+  let llm: LlmInterpretation | undefined = undefined;
+  let cached = null;
+  
+  if (useLlm) {
+    cached = await getCachedQuery(question);
+    if (cached) {
+      llm = cached;
+      console.log("[SemanticLayer] Cache hit for question:", question);
+    } else {
+      llm = await interpretWithLLM(question);
+      if (llm && !llm.ambiguity) {
+        const compiled = compileASTtoMQL(llm.metric, llm.dimension);
+        llm.mql = compiled.mql;
+        llm.columns = compiled.columns;
+        await cacheQuery(question, llm);
+      }
+    }
+  }
+
   const ambiguity = llm?.ambiguity ?? template.ambiguity ?? { detected: false, questions: [] };
   
   const safety = (ambiguity === true || (typeof ambiguity === "object" && ambiguity?.detected))
@@ -438,7 +466,7 @@ export async function buildSemanticQuery(question: string, useLlm = true, execut
     question,
     createdAt: new Date().toISOString(),
     intent: llm?.intent ?? template.intent,
-    confidence: (ambiguity === true || ambiguity?.detected) ? 0.62 : llm ? 0.99 : 0.91,
+    confidence: (ambiguity === true || ambiguity?.detected) ? 0.62 : llm ? (cached ? 1.0 : 0.99) : 0.91,
     entities: llm?.entities ?? template.entities,
     metric: llm?.metric ?? template.metric,
     dimension: llm?.dimension ?? template.dimension,
@@ -450,13 +478,13 @@ export async function buildSemanticQuery(question: string, useLlm = true, execut
     },
     ambiguity: typeof ambiguity === "boolean" ? { detected: ambiguity, explanation: llm?.note ?? "", questions: ["Show revenue by region", "Show top customers"] } : ambiguity,
     sql: mqlString,
-    sqlExplanation: llm ? "Dynamically generated MongoDB Aggregation Pipeline" : template.sqlExplanation,
+    sqlExplanation: llm ? (cached ? "Cached Deterministic MQL Compilation" : "Deterministic MQL Compilation via AST") : template.sqlExplanation,
     safety,
     result,
     answer: llm && !ambiguity ? (llm.note ?? "Here is the dynamic data you requested.") : template.answer,
     llm: {
       used: Boolean(llm),
-      status: llm ? "grounded" : "fallback",
+      status: llm ? (cached ? "cached" : "grounded") : "fallback",
       note: llm?.note ?? "Semantic intent was resolved by governed catalog matching; SQL is compiled from approved templates.",
     },
     baseline: template.baseline,

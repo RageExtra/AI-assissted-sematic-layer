@@ -2,7 +2,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
-import { Loader2, Send, User, Sparkles } from "lucide-react";
+import { Loader2, Send, User, Sparkles, Paperclip } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { Streamdown } from "streamdown";
 
@@ -15,6 +15,8 @@ export type Message = {
 };
 
 export type AIChatBoxProps = {
+  onFileUpload?: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  isUploadingFile?: boolean;
   /**
    * Messages array to display in the chat.
    * Should match the format used by invokeLLM on the server.
@@ -116,6 +118,8 @@ export function AIChatBox({
   isLoading = false,
   placeholder = "Type your message...",
   className,
+  onFileUpload,
+  isUploadingFile,
   height = "600px",
   emptyStateMessage = "Start a conversation with AI",
   suggestedPrompts,

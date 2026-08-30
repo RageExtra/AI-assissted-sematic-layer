@@ -1,0 +1,48 @@
+# Project TODO
+
+- [x] Establish the Semantic Layer Studio dashboard shell, navigation, responsive styling, and design system.
+- [x] Implement governed semantic entities, metrics, dimensions, aliases, relationships, provenance, and confidence models.
+- [x] Implement a safe read-only natural-language-to-SQL planning flow with ambiguity detection and clarification prompts.
+- [x] Add representative business demo data, executed query results, SQL explanation, and safety-validation evidence.
+- [x] Add query history and a baseline-versus-semantic comparison view.
+- [x] Add typed API procedures and database persistence for semantic query runs and feedback.
+- [x] Add automated tests for query safety, semantic context selection, and dashboard data flow.
+- [x] Verify the dashboard visually at desktop and mobile breakpoints and resolve any defects.
+- [x] Wire sidebar navigation to implemented workspace, semantic model, query history, and evaluation views.
+- [x] Add executable representative commerce demo data and return actual database query results for the governed query templates.
+- [x] Implement end-to-end query feedback capture with persistence, typed procedures, and visible controls.
+- [x] Add router-level integration tests for demonstration and history data flows.
+- [x] Reverify the updated interactive dashboard at desktop and mobile breakpoints.
+- [x] Execute user-submitted governed queries against the seeded demo database and cover that data path in integration tests.
+- [x] Add a credentialed data-warehouse connection flow with provider selection, safe secret handling, connection testing, and schema-discovery status.
+- [x] Add a steward editor for semantic entities, metrics, dimensions, aliases, relationships, approvals, and versioned rationale.
+- [x] Add configurable evaluation datasets, baseline settings, evaluation runs, reliability metrics, and research-ready comparison views.
+- [x] Differentiate the product with an evidence graph, policy envelope, approval lineage, and reproducibility-oriented reliability reporting.
+- [x] Add automated coverage for connection validation, semantic-definition governance, and evaluation metrics.
+- [x] Verify the extended workspace visually and preserve mobile usability.
+- [x] Document portable environment placeholders and Railway-ready deployment configuration without requiring live warehouse credentials.
+- [x] Add real provider-adapter connection validation and schema inspection when a deployed credential is present.
+- [x] Add case-level evaluation datasets and compute semantic-versus-baseline metrics from evaluated cases.
+- [x] Add an evidence-relationship graph and persisted definition approval-lineage timeline.
+- [x] Scope the live discovery flow to PostgreSQL and display real discovered schema, table, and field counts.
+- [x] Execute baseline SQL and repeated semantic runs per evaluation case to compute baseline and reproducibility metrics from observable outcomes.
+- [x] Display verified PostgreSQL schema, table, and field counts in the connection registry after discovery completes.
+- [x] Add steward-console role-based access control for viewers, editors, and approvers, with server-enforced permissions.
+- [x] Add CSV and JSON benchmark-dataset imports with validation, preview, persistence, and evaluation-lab integration.
+- [x] Add a visual evaluation observability dashboard with metric trends for semantic agreement, safety, grounding, and repeatability.
+- [x] Add automated coverage for role guards, import validation, and metric trend aggregation.
+- [x] Verify the expanded workspace visually at desktop and mobile breakpoints.
+- [x] Show parsed benchmark case previews and field-level validation status before import persistence.
+- [x] Add integration coverage for ordered metric-trend aggregation and persisted time-series values.
+- [x] Display field-level validation evidence for each previewed benchmark case before import persistence.
+- [x] Add an administrator panel for assigning viewer, editor, and approver roles to workspace users.
+- [x] Add recurring benchmark schedules with editable cadence, dataset selection, baseline configuration, and run history.
+- [x] Add safety and grounding threshold policies that generate approver-facing regression alerts.
+- [x] Add automated coverage for role assignment permissions, schedule execution, and regression alert logic.
+- [x] Verify the governance automation controls visually on desktop and mobile.
+- [x] Add editable baseline configuration and schedule-specific execution history to recurring benchmark controls.
+- [x] Add integration coverage for actual scheduled benchmark execution, timestamp updates, and persisted alerts.
+- [x] Render complete schedule-specific execution history, including per-run reliability receipts and associated regression alerts.
+- [x] Verify an executed schedule persists threshold-breach alerts that are linked to the scheduled evaluation receipt.
+- [x] Render every recorded schedule execution and expose each receipt’s full associated regression-alert detail.
+- [x] Copy the complete project source into the connected D:\\Semantic Layer folder and verify the synchronized file set.

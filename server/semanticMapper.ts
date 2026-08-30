@@ -7,8 +7,11 @@ export async function mapSemanticDefinitions(schemaSql: string): Promise<Omit<Se
     const model = models.data.find((m) => m.id === "gpt-5-mini" || m.id.includes("gpt-4")) ?? models.data[0];
     if (!model) throw new Error("No LLM available for semantic mapping.");
 
-    const systemPrompt = `You are a Semantic Layer architect. 
-Given a SQL schema, you must infer the core business definitions (Entities, Metrics, Dimensions, and Relationships).
+    const systemPrompt = `You are a Chief Data Officer and Semantic Layer architect specializing in Business and Finance. 
+Given a schema, you must infer the core business definitions (Entities, Metrics, Dimensions, and Relationships) with 100% financial accuracy. 
+- Never guess on ambiguous metrics. 
+- Ensure currency metrics strictly account for refunds, cancellations, and tax if the schema supports it.
+- Use exact business terminology (e.g., EBITDA, Gross Margin, Net Revenue).
 Output a JSON array of definitions adhering to the following structure:
 [
   {

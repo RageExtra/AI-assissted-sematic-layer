@@ -18,9 +18,12 @@ export async function designSchema(domain: string, retries = 2): Promise<SchemaD
       throw new Error("No LLM model available for schema design.");
     }
 
-    let systemPrompt = `You are an expert database architect.
+    let systemPrompt = `You are an expert Enterprise Database Architect specializing in Corporate Finance and Business Operations.
 The user will provide a business domain or application description.
-Your job is to design a robust, normalized MongoDB database schema for this domain.
+Your job is to design a robust, 100% accurate, and normalized MongoDB database schema tailored for financial strictness and business reporting.
+- Use precise types (e.g., Decimal128 or integer cents for currency, NEVER floats).
+- Ensure audit trails (createdAt, updatedAt, createdBy) on critical tables.
+- Define explicit relationships and constraints.
 Output MUST be a JSON object containing:
 - collections: An array where each element includes:
   - name: collection name string

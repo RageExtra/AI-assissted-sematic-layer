@@ -29,11 +29,11 @@ export default function Chat() {
     const file = e.target.files?.[0];
     if (!file) return;
     
-    if (file.name.endsWith(".pdf") || file.name.endsWith(".txt")) {
+    if (file.name.toLowerCase().endsWith(".pdf") || file.name.toLowerCase().endsWith(".txt")) {
       const reader = new FileReader();
       reader.onload = (event) => {
         const base64Data = (event.target?.result as string).split(',')[1];
-        uploadDocMutation.mutate({ name: file.name, fileType: file.type || (file.name.endsWith(".pdf") ? "application/pdf" : "text/plain"), base64Data });
+        uploadDocMutation.mutate({ name: file.name, fileType: file.type || (file.name.toLowerCase().endsWith(".pdf") ? "application/pdf" : "text/plain"), base64Data });
       };
       reader.readAsDataURL(file);
       return;

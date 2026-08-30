@@ -21,7 +21,7 @@ export const appRouter = router({
   }),
 
   ai: router({
-    chat: protectedProcedure
+    chat: publicProcedure
       .input(z.object({
         messages: z.array(z.object({
           role: z.enum(["system", "user", "assistant"]),
@@ -59,14 +59,14 @@ export const appRouter = router({
       })
   }),
   semantic: router({
-    validate: protectedProcedure
+    validate: publicProcedure
       .input(z.any())
       .mutation(async ({ input }) => {
         const { validateInterpretation } = await import("./validation");
         return validateInterpretation(input);
       }),
-    demo: protectedProcedure.query(() => getDemoQuery()),
-    run: protectedProcedure
+    demo: publicProcedure.query(() => getDemoQuery()),
+    run: publicProcedure
       .input(z.object({ question: z.string().trim().min(3).max(500), useLlm: z.boolean().optional() }))
       .mutation(async ({ input }) => {
         const run = await buildSemanticQuery(input.question, input.useLlm ?? true, true);
@@ -77,7 +77,7 @@ export const appRouter = router({
         }
         return run;
       }),
-    history: protectedProcedure.query(async () => {
+    history: publicProcedure.query(async () => {
       try {
         const stored = await listQueryRuns();
         if (stored.length) return stored;
@@ -86,23 +86,31 @@ export const appRouter = router({
       }
       return getDemoHistory();
     }),
-    feedback: protectedProcedure
+    feedback: publicProcedure
       .input(z.object({ runId: z.string().min(3).max(96), rating: z.enum(["helpful", "needs_review"]), note: z.string().trim().max(500).optional() }))
       .mutation(async ({ input }) => {
         await saveQueryFeedback(input);
         return { success: true } as const;
       }),
-    uploadDataset: protectedProcedure
+    uploadDataset: publicProcedure
       .input(z.object({ name: z.string(), data: z.array(z.any()) }))
       .mutation(async ({ input }) => {
         const { handleDatasetUpload } = await import("./semanticEngine");
         return handleDatasetUpload(input.name, input.data);
       }),
-    uploadDocument: protectedProcedure
+    uploadDocument: publicProcedure
       .input(z.object({ name: z.string(), fileType: z.string(), base64Data: z.string() }))
       .mutation(async ({ input }) => {
-        const { handleDocumentUpload } = await import("./semanticEngine");
-        return handleDocumentUpload(input.name, input.fileType, input.base64Data);
+        try {
+          console.log("[TRPC] Starting document upload:", input.name, input.fileType, "size:", input.base64Data.length);
+          const { handleDocumentUpload } = await import("./semanticEngine");
+          const result = await handleDocumentUpload(input.name, input.fileType, input.base64Data);
+          console.log("[TRPC] Document upload success:", result);
+          return result;
+        } catch (err) {
+          console.error("[TRPC] uploadDocument mutation failed:", err);
+          throw err;
+        }
       }),
   }),
   governance: router({

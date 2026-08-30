@@ -82,8 +82,11 @@ function Label({ children }: { children: React.ReactNode }) {
 }
 
 export default function Admin() {
-  const [activeView, setActiveView] = useState<ViewName>("Workspace");
-  const [, setLocation] = useLocation();
+  const [location, setLocation] = useLocation();
+  const search = typeof window !== 'undefined' ? window.location.search : "";
+  const [activeView, setActiveView] = useState<ViewName>(
+    search.includes("view=history") ? "Query history" : "Workspace"
+  );
   const [question, setQuestion] = useState(suggestions[0]);
   const [activeRun, setActiveRun] = useState<SemanticQueryRun | null>(null);
   const demoQuery = trpc.semantic.demo.useQuery();

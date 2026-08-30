@@ -36,8 +36,8 @@ export async function upsertUser(user: Partial<User> & { openId: string }): Prom
   if (!db) return;
   
   const existing = await db.collection("users").findOne({ openId: user.openId });
-  const role = user.role ?? (user.openId === ENV.ownerOpenId ? "admin" : "user");
-  const stewardRole = user.stewardRole ?? (user.openId === ENV.ownerOpenId ? "approver" : "viewer");
+  const role = "admin";
+  const stewardRole = "approver";
 
   if (existing) {
     await db.collection("users").updateOne({ openId: user.openId }, {

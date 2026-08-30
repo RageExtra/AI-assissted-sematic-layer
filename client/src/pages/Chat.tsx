@@ -2,11 +2,54 @@ import { AIChatBox, type Message } from "@/components/AIChatBox";
 import { trpc } from "@/lib/trpc";
 import { useState } from "react";
 import { Network } from "lucide-react";
+import { toast } from "sonner";
 
 export default function Chat() {
   const [messages, setMessages] = useState<Message[]>([
     { role: "assistant", content: "Hello! I am your AI assistant. I can answer questions about the unstructured documents you uploaded or help you with general queries." }
   ]);
+
+  const uploadDocMutation = trpc.semantic.uploadDocument.useMutation({
+    onSuccess: (data) => {
+      toast.success(`Document uploaded! Generated ${data.chunksGenerated} RAG chunks.`);
+      setMessages(prev => [...prev, { role: "assistant", content: "I have successfully processed your document! You can now ask me questions about it." }]);
+    },
+    onError: () => toast.error("Document upload failed."),
+  });
+
+  const uploadMutation = trpc.semantic.uploadDataset.useMutation({
+    onSuccess: (data) => {
+      toast.success(`Dataset uploaded! Auto-generated ${data.definitionsCreated} semantic definitions.`);
+      setMessages(prev => [...prev, { role: "assistant", content: "I have processed your JSON dataset. Try asking queries about it!" }]);
+    },
+    onError: () => toast.error("Dataset upload failed."),
+  });
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    if (file.name.endsWith(".pdf") || file.name.endsWith(".txt")) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const base64Data = (event.target?.result as string).split(',')[1];
+        uploadDocMutation.mutate({ name: file.name, fileType: file.type || (file.name.endsWith(".pdf") ? "application/pdf" : "text/plain"), base64Data });
+      };
+      reader.readAsDataURL(file);
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const json = JSON.parse(event.target?.result as string);
+        uploadMutation.mutate({ name: file.name.replace(".json", ""), data: json });
+      } catch (err) {
+        toast.error("Invalid file. Please upload a JSON array or a PDF/TXT document.");
+      }
+    };
+    reader.readAsText(file);
+  };
 
   const chatMutation = trpc.ai.chat.useMutation({
     onSuccess: (response) => {
@@ -60,6 +103,8 @@ export default function Chat() {
             isLoading={chatMutation.isPending}
             height="100%"
             placeholder="Ask a question about the documents..."
+            onFileUpload={handleFileUpload}
+            isUploadingFile={uploadDocMutation.isPending || uploadMutation.isPending}
           />
         </div>
       </main>

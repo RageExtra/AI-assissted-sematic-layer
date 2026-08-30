@@ -631,8 +631,10 @@ export async function handleDocumentUpload(name: string, fileType: string, base6
     let text = "";
     
     if (fileType === "application/pdf") {
-      const pdfParse = (await import("pdf-parse")).default || (await import("pdf-parse"));
-      const data = await (pdfParse as any)(buffer);
+      const { PDFParse } = await import("pdf-parse");
+      const parser = new PDFParse({ data: buffer });
+      const data = await parser.getText();
+      await parser.destroy();
       text = data.text;
     } else {
       text = buffer.toString("utf8");

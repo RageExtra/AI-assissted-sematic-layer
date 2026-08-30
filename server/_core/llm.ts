@@ -214,7 +214,7 @@ const normalizeToolChoice = (
 
 const resolveApiUrl = () =>
   ENV.openaiApiUrl && ENV.openaiApiUrl.trim().length > 0
-    ? `${ENV.openaiApiUrl.replace(/\/$/, "")}/v1/chat/completions`
+    ? `${ENV.openaiApiUrl.replace(/\/$/, "")}/chat/completions`
     : "https://api.openai.com/v1/chat/completions";
 
 const assertApiKey = () => {
@@ -436,7 +436,7 @@ export async function listLLMModels(): Promise<ModelsResponse> {
   assertApiKey();
 
   const url = ENV.openaiApiUrl && ENV.openaiApiUrl.trim().length > 0
-    ? `${ENV.openaiApiUrl.replace(/\/$/, "")}/v1/models`
+    ? `${ENV.openaiApiUrl.replace(/\/$/, "")}/models`
     : "https://api.openai.com/v1/models";
 
   const response = await fetchWithBackoff(url, {

@@ -2,7 +2,7 @@ import { z } from "zod";
 import { COOKIE_NAME } from "@shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
-import { adminProcedure, publicProcedure, router, stewardProcedure } from "./_core/trpc";
+import { adminProcedure, publicProcedure, protectedProcedure, router, stewardProcedure } from "./_core/trpc";
 import { getDemoHistory, getDemoQuery, buildSemanticQuery } from "./semanticEngine";
 import { listQueryRuns, saveQueryFeedback, saveQueryRun } from "./db";
 import { approveDefinition, definitionEvents, importEvaluationDataset, listDefinitions, listEvaluationDatasets, listEvaluationRuns, listEvaluationTrends, listSources, previewEvaluationImport, stageWarehouseConnection, testConnectionEnvelope, updateDefinition } from "./governance";
@@ -21,7 +21,7 @@ export const appRouter = router({
   }),
 
   ai: router({
-    chat: publicProcedure
+    chat: protectedProcedure
       .input(z.object({
         messages: z.array(z.object({
           role: z.enum(["system", "user", "assistant"]),
@@ -59,14 +59,14 @@ export const appRouter = router({
       })
   }),
   semantic: router({
-    validate: publicProcedure
+    validate: protectedProcedure
       .input(z.any())
       .mutation(async ({ input }) => {
         const { validateInterpretation } = await import("./validation");
         return validateInterpretation(input);
       }),
-    demo: publicProcedure.query(() => getDemoQuery()),
-    run: publicProcedure
+    demo: protectedProcedure.query(() => getDemoQuery()),
+    run: protectedProcedure
       .input(z.object({ question: z.string().trim().min(3).max(500), useLlm: z.boolean().optional() }))
       .mutation(async ({ input }) => {
         const run = await buildSemanticQuery(input.question, input.useLlm ?? true, true);
@@ -77,7 +77,7 @@ export const appRouter = router({
         }
         return run;
       }),
-    history: publicProcedure.query(async () => {
+    history: protectedProcedure.query(async () => {
       try {
         const stored = await listQueryRuns();
         if (stored.length) return stored;
@@ -86,19 +86,19 @@ export const appRouter = router({
       }
       return getDemoHistory();
     }),
-    feedback: publicProcedure
+    feedback: protectedProcedure
       .input(z.object({ runId: z.string().min(3).max(96), rating: z.enum(["helpful", "needs_review"]), note: z.string().trim().max(500).optional() }))
       .mutation(async ({ input }) => {
         await saveQueryFeedback(input);
         return { success: true } as const;
       }),
-    uploadDataset: publicProcedure
+    uploadDataset: protectedProcedure
       .input(z.object({ name: z.string(), data: z.array(z.any()) }))
       .mutation(async ({ input }) => {
         const { handleDatasetUpload } = await import("./semanticEngine");
         return handleDatasetUpload(input.name, input.data);
       }),
-    uploadDocument: publicProcedure
+    uploadDocument: protectedProcedure
       .input(z.object({ name: z.string(), fileType: z.string(), base64Data: z.string() }))
       .mutation(async ({ input }) => {
         const { handleDocumentUpload } = await import("./semanticEngine");
@@ -108,20 +108,20 @@ export const appRouter = router({
   governance: router({
     members: adminProcedure.query(() => db.listStewardMembers()),
     assignStewardRole: adminProcedure.input(z.object({ userId: z.number().int().positive(), stewardRole: z.enum(["viewer", "editor", "approver"]) })).mutation(({ input }) => db.assignStewardRole(input.userId, input.stewardRole)),
-    sources: publicProcedure.query(() => listSources()),
+    sources: stewardProcedure(["viewer", "editor", "approver"]).query(() => listSources()),
     stageSource: stewardProcedure(["editor", "approver"]).input(z.object({ name: z.string().trim().min(3).max(128), provider: z.enum(["postgresql", "snowflake", "bigquery", "databricks", "redshift", "mysql"]), host: z.string().trim().min(3).max(256), databaseName: z.string().trim().min(1).max(128), authMode: z.enum(["environment_uri", "service_account", "access_token"]), secretEnvKey: z.string().trim().regex(/^[A-Z][A-Z0-9_]{2,127}$/) })).mutation(({ input }) => stageWarehouseConnection(input)),
     testSource: stewardProcedure(["editor", "approver"]).input(z.object({ id: z.number().int().positive() })).mutation(({ input }) => testConnectionEnvelope(input.id)),
-    definitions: publicProcedure.query(() => listDefinitions()),
-    definitionEvents: publicProcedure.input(z.object({ id: z.number().int().positive() })).query(({ input }) => definitionEvents(input.id)),
+    definitions: stewardProcedure(["viewer", "editor", "approver"]).query(() => listDefinitions()),
+    definitionEvents: stewardProcedure(["viewer", "editor", "approver"]).input(z.object({ id: z.number().int().positive() })).query(({ input }) => definitionEvents(input.id)),
     updateDefinition: stewardProcedure(["editor", "approver"]).input(z.object({ id: z.number().int().positive(), description: z.string().trim().min(5), expression: z.string().trim().min(3), aliases: z.array(z.string().trim().min(1)).min(1), rationale: z.string().trim().min(5) })).mutation(({ input }) => updateDefinition(input)),
     approveDefinition: stewardProcedure(["approver"]).input(z.object({ id: z.number().int().positive(), rationale: z.string().trim().min(5).max(800) })).mutation(({ input }) => approveDefinition(input.id, input.rationale)),
-    datasets: publicProcedure.query(() => listEvaluationDatasets()),
-    evaluationRuns: publicProcedure.query(() => listEvaluationRuns()),
-    evaluationTrends: publicProcedure.query(() => listEvaluationTrends()),
+    datasets: stewardProcedure(["viewer", "editor", "approver"]).query(() => listEvaluationDatasets()),
+    evaluationRuns: stewardProcedure(["viewer", "editor", "approver"]).query(() => listEvaluationRuns()),
+    evaluationTrends: stewardProcedure(["viewer", "editor", "approver"]).query(() => listEvaluationTrends()),
     previewDataset: stewardProcedure(["editor", "approver"]).input(z.object({ format: z.enum(["csv", "json"]), content: z.string().min(2).max(300_000) })).mutation(({ input }) => previewEvaluationImport(input.format, input.content)),
     importDataset: stewardProcedure(["editor", "approver"]).input(z.object({ name: z.string().trim().min(3).max(160), description: z.string().trim().min(5).max(1200), scope: z.string().trim().min(2).max(160), version: z.string().trim().min(1).max(32), format: z.enum(["csv", "json"]), content: z.string().min(2).max(300_000) })).mutation(({ input }) => importEvaluationDataset(input)),
     runEvaluation: stewardProcedure(["editor", "approver"]).input(z.object({ datasetId: z.number().int().positive(), modelLabel: z.string().trim().min(2).max(96), retrievalDepth: z.number().int().min(1).max(8), baselineMode: z.enum(["direct_sql", "schema_prompt"]) })).mutation(({ input }) => executeEvaluationWithAlerts(input)),
-    automationState: publicProcedure.query(() => listAutomationState()),
+    automationState: stewardProcedure(["viewer", "editor", "approver"]).query(() => listAutomationState()),
     stageSchedule: stewardProcedure(["approver"]).input(z.object({ name: z.string().trim().min(3).max(160), datasetId: z.number().int().positive(), cron: z.string().trim().min(9).max(64), baselineMode: z.enum(["direct_sql", "schema_prompt"]), retrievalDepth: z.number().int().min(1).max(8) })).mutation(({ input }) => stageBenchmarkSchedule(input)),
     activateSchedule: stewardProcedure(["approver"]).input(z.object({ id: z.number().int().positive() })).mutation(({ input, ctx }) => activateBenchmarkSchedule(input.id, ctx.req.headers.cookie)),
     updateAlertPolicy: adminProcedure.input(z.object({ safetyThreshold: z.number().min(0.01).max(1), groundingThreshold: z.number().min(0.01).max(1), enabled: z.boolean() })).mutation(({ input }) => updateRegressionPolicy(input)),

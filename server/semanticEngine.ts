@@ -482,7 +482,7 @@ export async function buildSemanticQuery(question: string, useLlm = true, execut
   const mqlString = llm?.mql ? JSON.stringify(llm.mql, null, 2) : template.sql;
   
   return {
-    id: `demo_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+    id: `demo_${Date.now()}_${crypto.randomUUID().split("-")[0]}`, // Fixed audit finding
     question,
     createdAt: new Date().toISOString(),
     intent: llm?.intent ?? template.intent,

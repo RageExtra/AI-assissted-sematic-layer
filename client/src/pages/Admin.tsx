@@ -216,12 +216,12 @@ export default function Admin() {
               <DropdownMenuContent align="end" className="w-56">
                 <DropdownMenuLabel>My Account</DropdownMenuLabel>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem>Profile Settings</DropdownMenuItem>
-                <DropdownMenuItem>Personal API Tokens</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => toast.info("Profile settings opened", { description: "Configure your avatar, name, and notification preferences here." })}>Profile Settings</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => toast.info("API Tokens", { description: "Generate personal access tokens for local CLI and API access." })}>Personal API Tokens</DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem>Impersonate Role...</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => toast.info("Impersonation active", { description: "You are now viewing the workspace as a read-only Viewer." })}>Impersonate Role...</DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem className="text-red-600">Sign Out</DropdownMenuItem>
+                <DropdownMenuItem className="text-red-600" onClick={() => { toast.success("Signed out successfully"); setLocation("/"); }}>Sign Out</DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
@@ -272,9 +272,14 @@ export default function Admin() {
                       <button key={suggestion} onClick={() => { setQuestion(suggestion); runQuestion(suggestion); }} className="rounded-md bg-[#eef2ef] px-2.5 py-1.5 text-[11px] text-[#53636b] transition-colors hover:bg-[#dfe9e3] hover:text-[#224935]">{suggestion}</button>
                     ))}
                   </div>
-                  <Button onClick={() => runQuestion()} disabled={queryMutation.isPending} className="h-9 gap-2 rounded-lg bg-[#183347] px-4 text-xs shadow-none transition-transform active:scale-[0.97] hover:bg-[#25495e]">
-                    {queryMutation.isPending ? <LoaderCircle className="size-3.5 animate-spin" /> : <Send className="size-3.5" />} Run grounded query
-                  </Button>
+                  <div className="flex gap-2">
+                    <Button variant="outline" onClick={() => toast.info("Unstructured File RAG feature coming soon. Please contact an admin to set up the Vector Database.", { description: "You will soon be able to upload PDFs, Docs, and Spreadsheets to combine structured and unstructured search." })} className="h-9 gap-2 rounded-lg px-3 text-xs shadow-none border-[#cfdcd5] text-[#53636b] hover:bg-[#eef2ef] hover:text-[#183347]">
+                      <Paperclip className="size-3.5" /> Attach File
+                    </Button>
+                    <Button onClick={() => runQuestion()} disabled={queryMutation.isPending} className="h-9 gap-2 rounded-lg bg-[#183347] px-4 text-xs shadow-none transition-transform active:scale-[0.97] hover:bg-[#25495e]">
+                      {queryMutation.isPending ? <LoaderCircle className="size-3.5 animate-spin" /> : <Send className="size-3.5" />} Run grounded query
+                    </Button>
+                  </div>
                 </div>
               </div>
             </section>

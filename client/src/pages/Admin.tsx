@@ -15,6 +15,7 @@ import {
   CircleHelp,
   Clock3,
   Copy,
+  Database,
   DatabaseZap, TimerReset,
   FileSearch,
   GitBranch,
@@ -38,7 +39,6 @@ import { useEffect, useState } from "react";
 import { useLocation } from "wouter";
 import { toast } from "sonner";
 
-import { DatabaseZap, TimerReset } from "lucide-react";
 
 type ViewName = "Workspace" | "Semantic model" | "Query history" | "Evaluation" | "Data connections" | "Automation";
 

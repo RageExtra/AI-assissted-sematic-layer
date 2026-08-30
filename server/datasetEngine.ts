@@ -1,0 +1,214 @@
+import { invokeLLM } from "./_core/llm";
+import { getDb, createDefinition } from "./db";
+import { queryUnstructuredDocuments } from "./semanticEngine";
+
+const MAX_ROWS = 10_000;
+const MAX_FIELDS = 120;
+const MAX_CONTEXT_ROWS = 20;
+
+export type DatasetUploadResult = {
+  success: true;
+  datasetId: string;
+  collectionName: string;
+  rowCount: number;
+  fieldCount: number;
+  definitionsCreated: number;
+  schema: Record<string, { type: string; nullable: boolean; examples: unknown[] }>;
+};
+
+type Row = Record<string, unknown>;
+
+type FieldProfile = {
+  type: "number" | "date" | "boolean" | "string" | "mixed";
+  nullable: boolean;
+  examples: unknown[];
+};
+
+function isPlainRecord(value: unknown): value is Row {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function safeIdentifier(value: string, fallback: string) {
+  const normalized = value.toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "");
+  return (normalized || fallback).slice(0, 48);
+}
+
+function inferValueType(value: unknown): FieldProfile["type"] {
+  if (typeof value === "number" && Number.isFinite(value)) return "number";
+  if (typeof value === "boolean") return "boolean";
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return "date";
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return "string";
+    if (/^\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?)?$/.test(trimmed)) return "date";
+    if (/^-?\d+(?:\.\d+)?$/.test(trimmed)) return "number";
+  }
+  return "string";
+}
+
+function inferSchema(rows: Row[]) {
+  const keys = Array.from(new Set(rows.flatMap(row => Object.keys(row)))).slice(0, MAX_FIELDS);
+  const schema: Record<string, FieldProfile> = {};
+  for (const key of keys) {
+    const values = rows.map(row => row[key]).filter(value => value !== null && value !== undefined && value !== "");
+    const types = Array.from(new Set(values.map(inferValueType)));
+    schema[key] = {
+      type: types.length === 1 ? (types[0] ?? "string") : "mixed",
+      nullable: values.length !== rows.length,
+      examples: values.slice(0, 3),
+    };
+  }
+  return schema;
+}
+
+function metricLike(field: string, profile: FieldProfile) {
+  return profile.type === "number" && /amount|amounts|revenue|sales|price|cost|profit|margin|value|total|count|quantity|balance|income|expense|ebitda|growth|rate|percent|percentage|score/i.test(field);
+}
+
+function readableField(field: string) {
+  return field.replace(/[_-]+/g, " ").replace(/\b\w/g, char => char.toUpperCase());
+}
+
+function rowText(datasetName: string, row: Row) {
+  return `${datasetName} dataset row: ${Object.entries(row).map(([key, value]) => `${readableField(key)}: ${String(value ?? "")}`).join(" | ")}`;
+}
+
+function tokenize(text: string) {
+  return new Set(text.toLowerCase().split(/[^a-z0-9]+/).filter(token => token.length > 2));
+}
+
+function summarizeRows(rows: Row[]) {
+  const fields = Array.from(new Set(rows.flatMap(row => Object.keys(row)))).slice(0, MAX_FIELDS);
+  return fields.map(field => {
+    const values = rows.map(row => row[field]).filter(value => value !== null && value !== undefined && value !== "");
+    const numeric = values.filter(value => typeof value === "number" && Number.isFinite(value)) as number[];
+    if (numeric.length >= Math.max(2, values.length * 0.6)) {
+      const sum = numeric.reduce((total, value) => total + value, 0);
+      return `${readableField(field)}: numeric rows=${numeric.length}, sum=${sum}, average=${sum / numeric.length}, min=${Math.min(...numeric)}, max=${Math.max(...numeric)}`;
+    }
+    const counts = new Map<string, number>();
+    for (const value of values) counts.set(String(value), (counts.get(String(value)) ?? 0) + 1);
+    const topValues = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]).slice(0, 12).map(([value, count]) => `${value} (${count})`);
+    return `${readableField(field)}: categorical values=${topValues.join(", ")}`;
+  }).join("\\n");
+}
+
+function retrieveRows(question: string, documents: Array<{ text: string; row: Row }>) {
+  const questionTokens = tokenize(question);
+  return documents
+    .map(document => {
+      const rowTokens = tokenize(document.text);
+      let score = 0;
+      questionTokens.forEach(token => { if (rowTokens.has(token)) score += 1; });
+      return { ...document, score };
+    })
+    .filter(document => document.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, MAX_CONTEXT_ROWS);
+}
+
+export async function ingestDataset(name: string, inputRows: unknown[]): Promise<DatasetUploadResult> {
+  if (!Array.isArray(inputRows) || inputRows.length === 0) throw new Error("The dataset must contain at least one row.");
+  if (inputRows.length > MAX_ROWS) throw new Error(`The dataset is limited to ${MAX_ROWS.toLocaleString()} rows per upload.`);
+  const rows = inputRows.filter(isPlainRecord).map(row => {
+    const sanitized: Row = {};
+    for (const [key, value] of Object.entries(row).slice(0, MAX_FIELDS)) {
+      const cleanKey = key.trim().slice(0, 120);
+      if (cleanKey) sanitized[cleanKey] = typeof value === "string" ? value.slice(0, 4000) : value;
+    }
+    return sanitized;
+  });
+  if (rows.length !== inputRows.length) throw new Error("Every dataset row must be a JSON object.");
+
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  const datasetId = crypto.randomUUID();
+  const collectionName = `dataset_${datasetId.replace(/-/g, "").slice(0, 24)}`;
+  const datasetName = name.trim().replace(/\.[^.]+$/, "").slice(0, 160) || "Uploaded dataset";
+  const inferred = inferSchema(rows);
+  const schema = Object.fromEntries(Object.entries(inferred).map(([key, value]) => [key, value]));
+
+  await db.collection(collectionName).insertMany(rows.map(row => ({ ...row, _datasetId: datasetId })));
+  await db.collection("uploadedDatasets").insertOne({
+    id: datasetId,
+    name: datasetName,
+    collectionName,
+    rowCount: rows.length,
+    fieldCount: Object.keys(inferred).length,
+    schema,
+    status: "ready",
+    createdAt: new Date().toISOString(),
+  });
+
+  let definitionsCreated = 0;
+  await createDefinition({
+    kind: "entity",
+    name: datasetName,
+    description: `Uploaded business dataset containing ${rows.length.toLocaleString()} rows and ${Object.keys(inferred).length} fields.`,
+    expression: collectionName,
+    aliases: [datasetName.toLowerCase()],
+    evidence: [datasetId],
+    status: "pending_review",
+    version: 1,
+    rationale: "Generated from the uploaded dataset schema; review before using for regulated decisions.",
+  });
+  definitionsCreated += 1;
+
+  for (const [field, profile] of Object.entries(inferred)) {
+    const kind = metricLike(field, profile) ? "metric" : profile.type === "date" ? "dimension" : "dimension";
+    await createDefinition({
+      kind,
+      name: `${datasetName} · ${readableField(field)}`,
+      description: `${kind === "metric" ? "Numeric business measure" : "Business dimension"} inferred from the ${readableField(field)} field in ${datasetName}. Type: ${profile.type}; nullable: ${profile.nullable}.`,
+      expression: `${collectionName}.${field}`,
+      aliases: [field, field.replace(/[_-]+/g, " "), readableField(field)],
+      evidence: [datasetId, `field:${field}`],
+      status: "pending_review",
+      version: 1,
+      rationale: "Generated from observed uploaded values. Confirm business meaning and units before regulated use.",
+    });
+    definitionsCreated += 1;
+  }
+
+  await db.collection("datasetDocuments").insertMany(rows.slice(0, 2_000).map(row => ({
+    datasetId,
+    datasetName,
+    text: rowText(datasetName, row),
+    row,
+    createdAt: new Date().toISOString(),
+  })));
+
+  return { success: true, datasetId, collectionName, rowCount: rows.length, fieldCount: Object.keys(inferred).length, definitionsCreated, schema };
+}
+
+export async function answerBusinessQuestion(messages: Array<{ role: "user" | "assistant" | "system"; content: string }>) {
+  const lastQuestion = [...messages].reverse().find(message => message.role === "user")?.content?.trim();
+  if (!lastQuestion) throw new Error("A user question is required.");
+  if (lastQuestion.length > 2_000) throw new Error("Questions are limited to 2,000 characters.");
+
+  const db = await getDb();
+  const datasets = db ? await db.collection("uploadedDatasets").find({ status: "ready" }).sort({ createdAt: -1 }).limit(20).toArray() : [];
+  const definitions = db ? await db.collection("semanticDefinitions").find({ status: { $in: ["approved", "pending_review"] } }).sort({ updatedAt: -1 }).limit(120).toArray() : [];
+  const datasetDocs = db ? await db.collection("datasetDocuments").find({}).sort({ createdAt: -1 }).limit(20_000).toArray() : [];
+  const retrieved = retrieveRows(lastQuestion, datasetDocs.map(document => ({ text: String(document.text), row: document.row as Row })));
+  const datasetSummaries = db ? await Promise.all(datasets.map(async dataset => {
+    const rows = await db.collection(String(dataset.collectionName)).find({}).limit(MAX_ROWS).toArray();
+    return `DATASET SUMMARY: ${dataset.name}; complete_rows=${rows.length};\\n${summarizeRows(rows as Row[])}`;
+  })) : [];
+
+  const catalogContext = [...datasets.map(dataset => `DATASET: ${dataset.name}; rows=${dataset.rowCount}; fields=${JSON.stringify(dataset.schema)}`), ...datasetSummaries].join("\n\n");
+  const definitionContext = definitions.map(definition => `${definition.kind.toUpperCase()}: ${definition.name} — ${definition.description}; expression=${definition.expression}; aliases=${(definition.aliases ?? []).join(", ")}`).join("\n");
+  const documentContext = (await queryUnstructuredDocuments(lastQuestion, 5)).join("\n");
+  const rowContext = retrieved.map(document => document.text).join("\n");
+  const context = [catalogContext, definitionContext, rowContext, documentContext ? `DOCUMENT CONTEXT:\n${documentContext}` : ""].filter(Boolean).join("\n\n");
+  const system = `You are the Semantic Layer business and finance assistant. Answer in clear normal language, not SQL, JSON, or code. Use only the supplied governed catalog and retrieved dataset context for claims about uploaded data. Never invent figures, entities, dates, formulas, or financial conclusions. If the context is insufficient, say exactly what is missing and ask one concise clarification question. Explain business or finance terms whenever the user asks what a term means. For calculations, show the assumptions and say when a result is an estimate. Treat generated definitions as pending review and mention that limitation for material decisions. General conversation is allowed, but business/data answers must stay grounded.\n\nGOVERNED CONTEXT:\n${context || "No dataset has been uploaded yet."}`;
+  const response = await invokeLLM({
+    messages: [
+      { role: "system", content: system },
+      ...messages.filter(message => message.role !== "system").slice(-12),
+    ],
+    maxTokens: 900,
+  });
+  const content = response.choices[0]?.message.content;
+  return typeof content === "string" ? content : "I could not produce a grounded answer. Please rephrase the question.";
+}

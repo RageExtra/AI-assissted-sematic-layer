@@ -1,112 +1,131 @@
 import { AIChatBox, type Message } from "@/components/AIChatBox";
 import { trpc } from "@/lib/trpc";
-import { useState } from "react";
 import { Network } from "lucide-react";
+import { useState, type ChangeEvent } from "react";
 import { toast } from "sonner";
+
+const MAX_FILE_BYTES = 10 * 1024 * 1024;
+
+function parseDelimited(text: string, delimiter: "," | "\t") {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = "";
+  let quoted = false;
+  for (let i = 0; i < text.length; i += 1) {
+    const character = text[i];
+    const next = text[i + 1];
+    if (character === '"' && quoted && next === '"') { cell += '"'; i += 1; }
+    else if (character === '"') quoted = !quoted;
+    else if (character === delimiter && !quoted) { row.push(cell.trim()); cell = ""; }
+    else if ((character === "\n" || character === "\r") && !quoted) {
+      if (character === "\r" && next === "\n") i += 1;
+      row.push(cell.trim());
+      if (row.some(value => value.length > 0)) rows.push(row);
+      row = []; cell = "";
+    } else cell += character;
+  }
+  if (quoted) throw new Error("The delimited file contains an unterminated quoted value.");
+  if (cell.length || row.length) { row.push(cell.trim()); rows.push(row); }
+  const headers = rows.shift()?.map(header => header || "field") ?? [];
+  if (!headers.length || !rows.length) throw new Error("The file must contain a header row and at least one data row.");
+  return rows.map(values => Object.fromEntries(headers.map((header, index) => {
+    const value = values[index] ?? "";
+    if (value === "") return [header, null];
+    if (/^-?\d+(?:\.\d+)?$/.test(value)) return [header, Number(value)];
+    if (value.toLowerCase() === "true" || value.toLowerCase() === "false") return [header, value.toLowerCase() === "true"];
+    return [header, value];
+  })));
+}
 
 export default function Chat() {
   const [messages, setMessages] = useState<Message[]>([
-    { role: "assistant", content: "Hello! I am your AI assistant. I can answer questions about the unstructured documents you uploaded or help you with general queries." }
+    { role: "assistant", content: "Welcome. Upload a business or finance dataset, then ask me about it in normal language. I can also explain business terms and formulas. I will say when the uploaded data or semantic definitions are insufficient instead of inventing an answer." },
   ]);
 
-  const uploadDocMutation = trpc.semantic.uploadDocument.useMutation({
-    onSuccess: (data) => {
-      toast.success(`Document uploaded! Generated ${data.chunksGenerated} RAG chunks.`);
-      setMessages(prev => [...prev, { role: "assistant", content: "I have successfully processed your document! You can now ask me questions about it." }]);
-    },
-    onError: () => toast.error("Document upload failed."),
-  });
-
   const uploadMutation = trpc.semantic.uploadDataset.useMutation({
-    onSuccess: (data) => {
-      toast.success(`Dataset uploaded! Auto-generated ${data.definitionsCreated} semantic definitions.`);
-      setMessages(prev => [...prev, { role: "assistant", content: "I have processed your JSON dataset. Try asking queries about it!" }]);
+    onSuccess: data => {
+      const fields = Object.keys(data.schema).slice(0, 6).join(", ");
+      toast.success(`Dataset indexed: ${data.rowCount.toLocaleString()} rows`);
+      setMessages(previous => [...previous, { role: "assistant", content: `Your dataset is ready. I indexed **${data.rowCount.toLocaleString()} rows** across **${data.fieldCount} fields** and generated **${data.definitionsCreated} semantic definitions** for review.\n\nDetected fields include: ${fields}${data.fieldCount > 6 ? ", and more" : ""}. You can now ask questions such as “What was total revenue by region?” or “Explain EBITDA.”` }]);
     },
-    onError: () => toast.error("Dataset upload failed."),
+    onError: error => toast.error(error.message || "Dataset upload failed."),
   });
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+  const uploadDocumentMutation = trpc.semantic.uploadDocument.useMutation({
+    onSuccess: data => {
+      toast.success(`Document indexed: ${data.chunksGenerated} chunks`);
+      setMessages(previous => [...previous, { role: "assistant", content: `I indexed **${data.chunksGenerated} searchable document sections**. Ask me to explain a term or find a policy, definition, or business rule from the uploaded material.` }]);
+    },
+    onError: error => toast.error(error.message || "Document upload failed."),
+  });
+
+  const chatMutation = trpc.ai.chat.useMutation({
+    onSuccess: response => {
+      const answer = response.choices[0]?.message.content;
+      setMessages(previous => [...previous, { role: "assistant", content: typeof answer === "string" ? answer : "I could not produce a grounded answer. Please rephrase your question." }]);
+    },
+    onError: error => setMessages(previous => [...previous, { role: "assistant", content: `I could not complete that request. ${error.message}` }]),
+  });
+
+  const handleFileUpload = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
     if (!file) return;
-    
-    if (file.name.toLowerCase().endsWith(".pdf") || file.name.toLowerCase().endsWith(".txt")) {
+    if (file.size > MAX_FILE_BYTES) { toast.error("Files are limited to 10 MB."); return; }
+    const lowerName = file.name.toLowerCase();
+
+    if (lowerName.endsWith(".pdf") || lowerName.endsWith(".txt")) {
       const reader = new FileReader();
-      reader.onload = (event) => {
-        const base64Data = (event.target?.result as string).split(',')[1];
-        uploadDocMutation.mutate({ name: file.name, fileType: file.type || (file.name.toLowerCase().endsWith(".pdf") ? "application/pdf" : "text/plain"), base64Data });
+      reader.onload = () => {
+        const result = String(reader.result ?? "");
+        const base64Data = result.includes(",") ? result.split(",", 2)[1] : result;
+        uploadDocumentMutation.mutate({ name: file.name, fileType: file.type || (lowerName.endsWith(".pdf") ? "application/pdf" : "text/plain"), base64Data });
       };
       reader.readAsDataURL(file);
       return;
     }
 
     const reader = new FileReader();
-    reader.onload = (event) => {
+    reader.onload = () => {
       try {
-        const json = JSON.parse(event.target?.result as string);
-        uploadMutation.mutate({ name: file.name.replace(".json", ""), data: json });
-      } catch (err) {
-        toast.error("Invalid file. Please upload a JSON array or a PDF/TXT document.");
+        const raw = String(reader.result ?? "");
+        const data = lowerName.endsWith(".json") ? JSON.parse(raw) : parseDelimited(raw, lowerName.endsWith(".tsv") ? "\t" : ",");
+        if (!Array.isArray(data)) throw new Error("JSON must contain an array of row objects.");
+        uploadMutation.mutate({ name: file.name, data });
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Could not parse the file.");
       }
     };
     reader.readAsText(file);
   };
 
-  const chatMutation = trpc.ai.chat.useMutation({
-    onSuccess: (response) => {
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          content: response.choices[0].message.content as string,
-        },
-      ]);
-    },
-    onError: (error) => {
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          content: `**Error:** Failed to get response. (${error.message})`,
-        },
-      ]);
-    }
-  });
-
   const handleSendMessage = (content: string) => {
-    const newMessages: Message[] = [...messages, { role: "user", content }];
-    setMessages(newMessages);
-    chatMutation.mutate({ messages: newMessages });
+    const nextMessages = [...messages, { role: "user" as const, content }];
+    setMessages(nextMessages);
+    chatMutation.mutate({ messages: nextMessages });
   };
 
   return (
-    <div className="flex flex-col h-screen bg-[#f5f4ef] text-[#112235]">
-      <header className="flex shrink-0 w-full h-[72px] items-center justify-between border-b border-[#dfe3df] bg-[#faf9f5]/95 px-5 backdrop-blur lg:px-9">
-        <div className="flex items-center gap-2">
-          <div className="grid size-9 place-items-center rounded-xl bg-[#dff0e6] text-[#143f31] shadow-[0_8px_22px_rgba(0,0,0,0.18)]">
-            <Network className="size-5" strokeWidth={2.25} />
-          </div>
-          <div>
-            <p className="text-sm font-semibold tracking-tight text-[#102130]">AI Chatbot</p>
-          </div>
+    <div className="flex min-h-screen flex-col bg-[#f5f4ef] text-[#112235]">
+      <header className="flex h-[72px] shrink-0 items-center justify-between border-b border-[#dfe3df] bg-[#faf9f5]/95 px-5 backdrop-blur sm:px-8">
+        <div className="flex items-center gap-3">
+          <div className="grid size-9 place-items-center rounded-xl bg-[#dff0e6] text-[#143f31]"><Network className="size-5" /></div>
+          <div><p className="text-sm font-semibold tracking-tight">Semantic Layer</p><p className="text-[10px] uppercase tracking-[0.18em] text-[#75818a]">Business intelligence assistant</p></div>
         </div>
-        <div className="flex gap-4">
-          <a href="/" className="text-xs font-semibold text-[#68767e] hover:text-[#112235] transition-colors">Semantic Query</a>
-          <a href="/admin" className="text-xs font-semibold text-[#68767e] hover:text-[#112235] transition-colors">Admin Portal &rarr;</a>
-        </div>
+        <a href="/admin" className="text-xs font-semibold text-[#68767e] transition-colors hover:text-[#112235]">Background workspace →</a>
       </header>
-
-      <main className="flex-1 overflow-hidden p-4 sm:p-6 w-full max-w-5xl mx-auto">
-        <div className="h-full rounded-2xl border border-[#dfe3df] bg-white shadow-[0_10px_35px_rgba(24,45,57,0.045)] overflow-hidden">
-          <AIChatBox
-            messages={messages}
-            onSendMessage={handleSendMessage}
-            isLoading={chatMutation.isPending}
-            height="100%"
-            placeholder="Ask a question about the documents..."
-            onFileUpload={handleFileUpload}
-            isUploadingFile={uploadDocMutation.isPending || uploadMutation.isPending}
-          />
-        </div>
+      <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col px-3 py-3 sm:px-6 sm:py-6">
+        <AIChatBox
+          messages={messages}
+          onSendMessage={handleSendMessage}
+          isLoading={chatMutation.isPending}
+          height="calc(100vh - 120px)"
+          placeholder="Ask about your data or explain a business term…"
+          onFileUpload={handleFileUpload}
+          isUploadingFile={uploadMutation.isPending || uploadDocumentMutation.isPending}
+          emptyStateMessage="Upload a dataset or start a conversation"
+          suggestedPrompts={["What fields are in my dataset?", "Explain EBITDA in simple terms", "What revenue trends can you find?"]}
+        />
       </main>
     </div>
   );

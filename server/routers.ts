@@ -7,6 +7,7 @@ import { getDemoHistory, getDemoQuery, buildSemanticQuery } from "./semanticEngi
 import { listQueryRuns, saveQueryFeedback, saveQueryRun } from "./db";
 import { approveDefinition, definitionEvents, importEvaluationDataset, listDefinitions, listEvaluationDatasets, listEvaluationRuns, listEvaluationTrends, listSources, previewEvaluationImport, stageWarehouseConnection, testConnectionEnvelope, updateDefinition } from "./governance";
 import { acknowledgeAlert, activateBenchmarkSchedule, executeEvaluationWithAlerts, listAutomationState, stageBenchmarkSchedule, updateRegressionPolicy } from "./automation";
+import { answerBusinessQuestion, ingestDataset } from "./datasetEngine";
 import * as db from "./db";
 
 export const appRouter = router({
@@ -25,37 +26,12 @@ export const appRouter = router({
       .input(z.object({
         messages: z.array(z.object({
           role: z.enum(["system", "user", "assistant"]),
-          content: z.string()
-        }))
+          content: z.string().trim().min(1).max(2_000)
+        })).min(1).max(24)
       }))
       .mutation(async ({ input }) => {
-        const { invokeLLM } = await import("./_core/llm");
-        const { queryUnstructuredDocuments } = await import("./semanticEngine");
-
-        const lastUserMsg = [...input.messages].reverse().find(m => m.role === "user");
-        let contextText = "";
-        
-        if (lastUserMsg) {
-          const matchedDocs = await queryUnstructuredDocuments(lastUserMsg.content, 3);
-          if (matchedDocs.length > 0) {
-            contextText = "\n\n--- Relevant Extracted Document Context ---\n" + matchedDocs.join("\n\n...\n\n") + "\n------------------------------------------";
-          }
-        }
-
-        const augmentedMessages = [...input.messages];
-        if (contextText && augmentedMessages.length > 0) {
-          if (augmentedMessages[0].role === "system") {
-            augmentedMessages[0].content += contextText;
-          } else {
-            augmentedMessages.unshift({ role: "system", content: "You are a helpful AI assistant. Use the following document context to answer the user's questions if relevant." + contextText });
-          }
-        }
-
-        const response = await invokeLLM({
-          messages: augmentedMessages
-        });
-
-        return response;
+        const answer = await answerBusinessQuestion(input.messages);
+        return { choices: [{ message: { role: "assistant" as const, content: answer } }] };
       })
   }),
   semantic: router({
@@ -93,13 +69,10 @@ export const appRouter = router({
         return { success: true } as const;
       }),
     uploadDataset: publicProcedure
-      .input(z.object({ name: z.string(), data: z.array(z.any()) }))
-      .mutation(async ({ input }) => {
-        const { handleDatasetUpload } = await import("./semanticEngine");
-        return handleDatasetUpload(input.name, input.data);
-      }),
+      .input(z.object({ name: z.string().trim().min(1).max(160), data: z.array(z.unknown()).min(1).max(10_000) }))
+      .mutation(async ({ input }) => ingestDataset(input.name, input.data)),
     uploadDocument: publicProcedure
-      .input(z.object({ name: z.string(), fileType: z.string(), base64Data: z.string() }))
+      .input(z.object({ name: z.string().trim().min(1).max(160), fileType: z.enum(["application/pdf", "text/plain"]), base64Data: z.string().min(1).max(14_000_000) }))
       .mutation(async ({ input }) => {
         try {
           console.log("[TRPC] Starting document upload:", input.name, input.fileType, "size:", input.base64Data.length);

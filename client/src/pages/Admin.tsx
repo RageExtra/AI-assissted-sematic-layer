@@ -112,6 +112,11 @@ export default function Admin() {
     onError: () => toast.error("Feedback could not be recorded. Please try again."),
   });
 
+  const uploadDocMutation = trpc.semantic.uploadDocument.useMutation({
+    onSuccess: data => toast.success(`Document indexed: ${data.chunksGenerated} chunks.`),
+    onError: error => toast.error(error.message || "Document upload failed."),
+  });
+
   const uploadMutation = trpc.semantic.uploadDataset.useMutation({
     onSuccess: (data) => toast.success(`Dataset uploaded! Auto-generated ${data.definitionsCreated} semantic definitions.`),
     onError: () => toast.error("Dataset upload failed."),

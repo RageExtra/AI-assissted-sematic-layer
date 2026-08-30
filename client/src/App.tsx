@@ -4,7 +4,6 @@ import NotFound from "@/pages/NotFound";
 import { Route, Switch } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
-import Home from "./pages/Home";
 import Chat from "./pages/Chat";
 import Admin from "./pages/Admin";
 import Connections from "./pages/Connections";
@@ -16,7 +15,7 @@ function Router() {
   // make sure to consider if you need authentication for certain routes
   return (
     <Switch>
-      <Route path={"/"} component={Home} />
+      <Route path={"/"} component={Chat} />
       <Route path={"/chat"} component={Chat} />
       <Route path={"/admin"} component={Admin} />
       <Route path={"/connections"} component={Connections} />

@@ -1,7 +1,7 @@
 import { AIChatBox, type Message } from "@/components/AIChatBox";
 import { trpc } from "@/lib/trpc";
 import { Network } from "lucide-react";
-import { useState, type ChangeEvent } from "react";
+import { useEffect, useState, type ChangeEvent } from "react";
 import { toast } from "sonner";
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
@@ -41,12 +41,19 @@ export default function Chat() {
   const [messages, setMessages] = useState<Message[]>([
     { role: "assistant", content: "Welcome. Upload a business or finance dataset, then ask me about it in normal language. I can also explain business terms and formulas. I will say when the uploaded data or semantic definitions are insufficient instead of inventing an answer." },
   ]);
+  const [datasetJobId, setDatasetJobId] = useState<string | null>(null);
+  const [handledJobId, setHandledJobId] = useState<string | null>(null);
+  const datasetJobQuery = trpc.semantic.datasetJob.useQuery(
+    { jobId: datasetJobId ?? "00000000-0000-0000-0000-000000000000" },
+    { enabled: Boolean(datasetJobId), refetchInterval: datasetJobId ? 1000 : false },
+  );
 
   const uploadMutation = trpc.semantic.uploadDataset.useMutation({
     onSuccess: data => {
-      const fields = Object.keys(data.schema).slice(0, 6).join(", ");
-      toast.success(`Dataset indexed: ${data.rowCount.toLocaleString()} rows`);
-      setMessages(previous => [...previous, { role: "assistant", content: `Your dataset is ready. I indexed **${data.rowCount.toLocaleString()} rows** across **${data.fieldCount} fields** and generated **${data.definitionsCreated} semantic definitions** for review.\n\nDetected fields include: ${fields}${data.fieldCount > 6 ? ", and more" : ""}. You can now ask questions such as “What was total revenue by region?” or “Explain EBITDA.”` }]);
+      setDatasetJobId(data.jobId);
+      setHandledJobId(null);
+      toast.success("Dataset upload received; background indexing started.");
+      setMessages(previous => [...previous, { role: "assistant", content: "I received the dataset and started background indexing. I will let you know when its schema and semantic definitions are ready." }]);
     },
     onError: error => toast.error(error.message || "Dataset upload failed."),
   });
@@ -58,6 +65,20 @@ export default function Chat() {
     },
     onError: error => toast.error(error.message || "Document upload failed."),
   });
+
+  useEffect(() => {
+    const job = datasetJobQuery.data;
+    if (!job || !datasetJobId || job.status === "queued" || job.status === "processing" || handledJobId === datasetJobId) return;
+    setHandledJobId(datasetJobId);
+    if (job.status === "failed") {
+      setMessages(previous => [...previous, { role: "assistant", content: `Dataset indexing failed: ${job.error ?? "Unknown processing error"}` }]);
+      return;
+    }
+    const result = job.result;
+    if (!result) return;
+    const fields = Object.keys(result.schema).slice(0, 6).join(", ");
+    setMessages(previous => [...previous, { role: "assistant", content: `Your dataset is ready. I indexed **${result.rowCount.toLocaleString()} rows** across **${result.fieldCount} fields** and generated **${result.definitionsCreated} semantic definitions** for review.\\n\\nDetected fields include: ${fields}${result.fieldCount > 6 ? ", and more" : ""}. You can now ask questions such as “What was total revenue by region?” or “Explain EBITDA.”` }]);
+  }, [datasetJobId, datasetJobQuery.data, handledJobId]);
 
   const chatMutation = trpc.ai.chat.useMutation({
     onSuccess: response => {
@@ -79,7 +100,7 @@ export default function Chat() {
       reader.onload = () => {
         const result = String(reader.result ?? "");
         const base64Data = result.includes(",") ? result.split(",", 2)[1] : result;
-        uploadDocumentMutation.mutate({ name: file.name, fileType: file.type || (lowerName.endsWith(".pdf") ? "application/pdf" : "text/plain"), base64Data });
+        uploadDocumentMutation.mutate({ name: file.name, fileType: lowerName.endsWith(".pdf") ? "application/pdf" : "text/plain", base64Data });
       };
       reader.readAsDataURL(file);
       return;

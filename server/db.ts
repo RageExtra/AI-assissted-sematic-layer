@@ -3,6 +3,7 @@ import { User } from "./types";
 import type { AlertPolicy, BenchmarkSchedule, DataSourceRecord, DefinitionEvent, EvaluationCase, EvaluationDataset, EvaluationRun, RegressionAlert, SemanticDefinition, StewardMember } from "../shared/governance";
 import type { SemanticQueryRun } from "../shared/semantic";
 import { ENV } from "./_core/env";
+import { randomInt } from "node:crypto";
 
 let _client: MongoClient | null = null;
 let _db: Db | null = null;
@@ -29,7 +30,7 @@ export async function getDb(): Promise<Db | null> {
 
 // Generate a numeric ID (since frontend expects number for most IDs)
 function generateId() {
-  return Date.now() + Math.floor(Math.random() * 1000);
+  return Date.now() * 1_000 + randomInt(0, 1_000);
 }
 
 export async function upsertUser(user: Partial<User> & { openId: string }): Promise<void> {
@@ -58,8 +59,8 @@ export async function upsertUser(user: Partial<User> & { openId: string }): Prom
       lastSignedIn: user.lastSignedIn ?? new Date(),
       createdAt: new Date(),
       updatedAt: new Date(),
-      role: "admin",
-      stewardRole: "approver"
+      role: user.role ?? "user",
+      stewardRole: user.stewardRole ?? "viewer"
     });
   }
 }

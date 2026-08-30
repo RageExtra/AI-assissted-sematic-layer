@@ -100,7 +100,7 @@ export default function Home() {
   });
 
     const uploadMutation = trpc.semantic.uploadDataset.useMutation({
-    onSuccess: (data) => toast.success(`Dataset uploaded! Auto-generated ${data.definitionsCreated} semantic definitions.`),
+    onSuccess: () => toast.success("Dataset upload received; background indexing started."),
     onError: () => toast.error("Dataset upload failed."),
   });
 
@@ -117,7 +117,7 @@ export default function Home() {
       const reader = new FileReader();
       reader.onload = (event) => {
         const base64Data = (event.target?.result as string).split(',')[1];
-        uploadDocMutation.mutate({ name: file.name, fileType: file.type || (file.name.endsWith(".pdf") ? "application/pdf" : "text/plain"), base64Data });
+        uploadDocMutation.mutate({ name: file.name, fileType: file.name.toLowerCase().endsWith(".pdf") ? "application/pdf" : "text/plain", base64Data });
       };
       reader.readAsDataURL(file);
       return;

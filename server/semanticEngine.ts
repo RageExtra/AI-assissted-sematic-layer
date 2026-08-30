@@ -522,10 +522,12 @@ export async function getDemoHistory(): Promise<SemanticQueryRun[]> {
   ];
   return Promise.all(questions.map(question => buildSemanticQuery(question, false, true)));
 }
+let prewarmTimer: ReturnType<typeof setInterval> | undefined;
+
 export function startCachePreWarming() {
+  if (prewarmTimer) return;
   console.log("[SemanticLayer] Initializing predictive cache pre-warming cron task...");
-  // Simulate running a pre-warm every hour by starting it on boot
-  setInterval(async () => {
+  prewarmTimer = setInterval(async () => {
     console.log("[SemanticLayer] Running predictive cache pre-warming...");
     try {
       // Prewarm common questions
@@ -542,6 +544,7 @@ export function startCachePreWarming() {
       console.error("[SemanticLayer] Pre-warming failed:", e);
     }
   }, 1000 * 60 * 60); // 1 hour
+  prewarmTimer.unref?.();
 }
 
 ﻿

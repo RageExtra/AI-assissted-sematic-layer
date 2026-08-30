@@ -1,5 +1,5 @@
 import { invokeLLM } from "./_core/llm";
-import { getDb, createDefinition } from "./db";
+import { getDb, createCollection, createDefinition } from "./db";
 import { queryUnstructuredDocuments } from "./semanticEngine";
 
 const MAX_ROWS = 10_000;
@@ -107,7 +107,7 @@ function retrieveRows(question: string, documents: Array<{ text: string; row: Ro
     .slice(0, MAX_CONTEXT_ROWS);
 }
 
-export async function ingestDataset(name: string, inputRows: unknown[]): Promise<DatasetUploadResult> {
+async function processDatasetUpload(name: string, inputRows: unknown[]): Promise<DatasetUploadResult> {
   if (!Array.isArray(inputRows) || inputRows.length === 0) throw new Error("The dataset must contain at least one row.");
   if (inputRows.length > MAX_ROWS) throw new Error(`The dataset is limited to ${MAX_ROWS.toLocaleString()} rows per upload.`);
   const rows = inputRows.filter(isPlainRecord).map(row => {
@@ -127,7 +127,11 @@ export async function ingestDataset(name: string, inputRows: unknown[]): Promise
   const datasetName = name.trim().replace(/\.[^.]+$/, "").slice(0, 160) || "Uploaded dataset";
   const inferred = inferSchema(rows);
   const schema = Object.fromEntries(Object.entries(inferred).map(([key, value]) => [key, value]));
-
+  const mongoSchema = {
+    bsonType: "object",
+    properties: Object.fromEntries(Object.entries(inferred).map(([key, profile]) => [key, profile.type === "number" ? { bsonType: ["double", "int", "long", "decimal", "null"] } : profile.type === "boolean" ? { bsonType: ["bool", "null"] } : { bsonType: ["string", "date", "null"] }])),
+  };
+  await createCollection(collectionName, mongoSchema, [{ key: { _datasetId: 1 }, options: { name: "dataset_scope" } }]);
   await db.collection(collectionName).insertMany(rows.map(row => ({ ...row, _datasetId: datasetId })));
   await db.collection("uploadedDatasets").insertOne({
     id: datasetId,
@@ -179,6 +183,37 @@ export async function ingestDataset(name: string, inputRows: unknown[]): Promise
   })));
 
   return { success: true, datasetId, collectionName, rowCount: rows.length, fieldCount: Object.keys(inferred).length, definitionsCreated, schema };
+}
+
+export type DatasetJob = { jobId: string; status: "queued" | "processing" | "ready" | "failed"; result?: DatasetUploadResult; error?: string };
+
+export async function queueDatasetIngestion(name: string, inputRows: unknown[]): Promise<DatasetJob> {
+  if (!Array.isArray(inputRows) || inputRows.length === 0) throw new Error("The dataset must contain at least one row.");
+  if (inputRows.length > MAX_ROWS) throw new Error(`The dataset is limited to ${MAX_ROWS.toLocaleString()} rows per upload.`);
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  const jobId = crypto.randomUUID();
+  await db.collection("datasetJobs").insertOne({ jobId, name: name.trim().slice(0, 160), status: "queued", createdAt: new Date().toISOString() });
+  setImmediate(async () => {
+    try {
+      await db.collection("datasetJobs").updateOne({ jobId }, { $set: { status: "processing", startedAt: new Date().toISOString() } });
+      const result = await processDatasetUpload(name, inputRows);
+      await db.collection("datasetJobs").updateOne({ jobId }, { $set: { status: "ready", result, completedAt: new Date().toISOString() } });
+    } catch (error) {
+      await db.collection("datasetJobs").updateOne({ jobId }, { $set: { status: "failed", error: error instanceof Error ? error.message : "Dataset processing failed", completedAt: new Date().toISOString() } });
+    }
+  });
+  return { jobId, status: "queued" };
+}
+
+export async function getDatasetJob(jobId: string): Promise<DatasetJob | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const job = await db.collection("datasetJobs").findOne({ jobId });
+  if (!job) return null;
+  const result = { jobId, status: job.status, result: job.result, error: job.error } as DatasetJob;
+  delete (result as { _id?: unknown })._id;
+  return result;
 }
 
 export async function answerBusinessQuestion(messages: Array<{ role: "user" | "assistant" | "system"; content: string }>) {

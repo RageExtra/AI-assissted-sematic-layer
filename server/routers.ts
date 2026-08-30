@@ -7,7 +7,7 @@ import { getDemoHistory, getDemoQuery, buildSemanticQuery } from "./semanticEngi
 import { listQueryRuns, saveQueryFeedback, saveQueryRun } from "./db";
 import { approveDefinition, definitionEvents, importEvaluationDataset, listDefinitions, listEvaluationDatasets, listEvaluationRuns, listEvaluationTrends, listSources, previewEvaluationImport, stageWarehouseConnection, testConnectionEnvelope, updateDefinition } from "./governance";
 import { acknowledgeAlert, activateBenchmarkSchedule, executeEvaluationWithAlerts, listAutomationState, stageBenchmarkSchedule, updateRegressionPolicy } from "./automation";
-import { answerBusinessQuestion, ingestDataset } from "./datasetEngine";
+import { answerBusinessQuestion, getDatasetJob, queueDatasetIngestion } from "./datasetEngine";
 import * as db from "./db";
 
 export const appRouter = router({
@@ -70,7 +70,10 @@ export const appRouter = router({
       }),
     uploadDataset: publicProcedure
       .input(z.object({ name: z.string().trim().min(1).max(160), data: z.array(z.unknown()).min(1).max(10_000) }))
-      .mutation(async ({ input }) => ingestDataset(input.name, input.data)),
+      .mutation(async ({ input }) => queueDatasetIngestion(input.name, input.data)),
+    datasetJob: publicProcedure
+      .input(z.object({ jobId: z.string().uuid() }))
+      .query(({ input }) => getDatasetJob(input.jobId)),
     uploadDocument: publicProcedure
       .input(z.object({ name: z.string().trim().min(1).max(160), fileType: z.enum(["application/pdf", "text/plain"]), base64Data: z.string().min(1).max(14_000_000) }))
       .mutation(async ({ input }) => {

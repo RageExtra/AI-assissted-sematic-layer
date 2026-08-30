@@ -271,6 +271,30 @@ const normalizeResponseFormat = ({
   };
 };
 
+let discoveredModelCache: { model: string; expiresAt: number } | null = null;
+
+async function resolveChatModel(): Promise<string> {
+  if (discoveredModelCache && discoveredModelCache.expiresAt > Date.now()) return discoveredModelCache.model;
+  const configured = ENV.openaiModel?.trim();
+  try {
+    const response = await fetchWithBackoff(`${resolveApiBaseUrl()}/models`, {
+      headers: { authorization: `Bearer ${ENV.openaiApiKey}` },
+    });
+    if (!response.ok) throw new Error(`model discovery returned ${response.status}`);
+    const payload = await response.json() as { data?: Array<{ id?: string }> };
+    const models = (payload.data ?? []).map(item => item.id).filter((id): id is string => Boolean(id));
+    const preferred = models.find(id => configured && id === configured)
+      ?? models.find(id => /gpt|claude|gemini|llama|mistral|qwen|deepseek/i.test(id) && !/embedding|moderation|whisper|tts|dall-e|image/i.test(id))
+      ?? models.find(id => !/embedding|moderation|whisper|tts|dall-e|image/i.test(id));
+    if (!preferred) throw new Error("provider returned no chat-capable models");
+    discoveredModelCache = { model: preferred, expiresAt: Date.now() + 10 * 60 * 1000 };
+    return preferred;
+  } catch (error) {
+    if (configured) return configured;
+    throw new Error(`No chat model is available from the configured provider. Set OPENAI_MODEL to a model returned by ${resolveApiBaseUrl()}/models. ${error instanceof Error ? error.message : ""}`);
+  }
+}
+
 const RETRY_MAX_RETRIES = 4;
 const RETRY_BASE_DELAY_MS = 500;
 const RETRY_MAX_DELAY_MS = 30_000;
@@ -362,7 +386,7 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
   } = params;
 
   const payload: Record<string, unknown> = {
-    model: model || ENV.openaiModel,
+    model: model || await resolveChatModel(),
     messages: messages.map(normalizeMessage),
   };
 

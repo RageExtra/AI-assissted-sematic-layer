@@ -16,8 +16,8 @@ const envVars = {
   ownerOpenId: process.env.OWNER_OPEN_ID ?? "admin-local",
   isProduction,
   openaiApiKey: process.env.OPENAI_API_KEY ?? "",
-  openaiApiUrl: process.env.OPENAI_BASE_URL ?? "https://api.openai.com/v1",
-  openaiModel: process.env.OPENAI_MODEL ?? "gpt-4o-mini",
+  openaiApiUrl: process.env.OPENAI_BASE_URL ?? process.env.OPENAI_API_BASE ?? "https://api.openai.com/v1",
+  openaiModel: process.env.OPENAI_MODEL ?? "",
 };
 
 export const ENV = {

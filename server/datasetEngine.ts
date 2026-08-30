@@ -182,6 +182,7 @@ async function processDatasetUpload(name: string, inputRows: unknown[]): Promise
     row,
     createdAt: new Date().toISOString(),
   })));
+  await db.collection("datasetDocuments").createIndex({ text: "text" }, { name: "dataset_document_text_search" });
 
   return { success: true, datasetId, collectionName, rowCount: rows.length, fieldCount: Object.keys(inferred).length, definitionsCreated, schema };
 }
@@ -217,6 +218,30 @@ export async function getDatasetJob(jobId: string): Promise<DatasetJob | null> {
   return result;
 }
 
+let catalogCache: { value: string; expiresAt: number } | null = null;
+
+async function getCatalogContext() {
+  if (catalogCache && catalogCache.expiresAt > Date.now()) return catalogCache.value;
+  const db = await getDb();
+  if (!db) return "";
+  const datasets = await db.collection("uploadedDatasets").find({ status: "ready" }).sort({ createdAt: -1 }).limit(20).toArray();
+  const definitions = await db.collection("semanticDefinitions").find({ status: { $in: ["approved", "pending_review"] } }).sort({ updatedAt: -1 }).limit(120).toArray();
+  const datasetSummaries = datasets.map(dataset => `DATASET SUMMARY: ${dataset.name}; complete_rows=${dataset.rowCount};\\n${String(dataset.summary ?? "No persisted summary is available.")}`);
+  const value = [...datasets.map(dataset => `DATASET: ${dataset.name}; rows=${dataset.rowCount}; fields=${JSON.stringify(dataset.schema)}`), ...datasetSummaries, definitions.map(definition => `${definition.kind.toUpperCase()}: ${definition.name} — ${definition.description}; expression=${definition.expression}; aliases=${(definition.aliases ?? []).join(", ")}`).join("\\n")].filter(Boolean).join("\\n\\n");
+  catalogCache = { value, expiresAt: Date.now() + 30_000 };
+  return value;
+}
+
+async function findRelevantDatasetDocuments(question: string) {
+  const db = await getDb();
+  if (!db) return [];
+  try {
+    return await db.collection("datasetDocuments").find({ $text: { $search: question } }, { projection: { text: 1, row: 1 } }).sort({ score: { $meta: "textScore" } }).limit(40).toArray();
+  } catch {
+    return db.collection("datasetDocuments").find({}, { projection: { text: 1, row: 1 } }).sort({ createdAt: -1 }).limit(120).toArray();
+  }
+}
+
 export async function answerBusinessQuestion(messages: Array<{ role: "user" | "assistant" | "system"; content: string }>) {
   const lastQuestion = [...messages].reverse().find(message => message.role === "user")?.content?.trim();
   if (!lastQuestion) throw new Error("A user question is required.");
@@ -225,24 +250,19 @@ export async function answerBusinessQuestion(messages: Array<{ role: "user" | "a
   if (quickReply) return lastQuestion.toLowerCase().startsWith("thank") ? "You’re welcome. Upload a business or finance file whenever you’re ready, and I’ll help you explore or explain it." : "Hello. I can analyze uploaded business and finance data, explain terminology, and answer grounded questions in normal language. Upload a file or ask me anything to get started.";
 
   const db = await getDb();
-  const datasets = db ? await db.collection("uploadedDatasets").find({ status: "ready" }).sort({ createdAt: -1 }).limit(20).toArray() : [];
-  const definitions = db ? await db.collection("semanticDefinitions").find({ status: { $in: ["approved", "pending_review"] } }).sort({ updatedAt: -1 }).limit(120).toArray() : [];
-  const datasetDocs = db ? await db.collection("datasetDocuments").find({}).sort({ createdAt: -1 }).limit(20_000).toArray() : [];
+  const catalogContext = await getCatalogContext();
+  const datasetDocs = db ? await findRelevantDatasetDocuments(lastQuestion) : [];
   const retrieved = retrieveRows(lastQuestion, datasetDocs.map(document => ({ text: String(document.text), row: document.row as Row })));
-  const datasetSummaries = datasets.map(dataset => `DATASET SUMMARY: ${dataset.name}; complete_rows=${dataset.rowCount};\\n${String(dataset.summary ?? "No persisted summary is available.")}`);
-
-  const catalogContext = [...datasets.map(dataset => `DATASET: ${dataset.name}; rows=${dataset.rowCount}; fields=${JSON.stringify(dataset.schema)}`), ...datasetSummaries].join("\n\n");
-  const definitionContext = definitions.map(definition => `${definition.kind.toUpperCase()}: ${definition.name} — ${definition.description}; expression=${definition.expression}; aliases=${(definition.aliases ?? []).join(", ")}`).join("\n");
   const documentContext = datasetDocs.length > 0 ? (await queryUnstructuredDocuments(lastQuestion, 5)).join("\n") : "";
   const rowContext = retrieved.map(document => document.text).join("\n");
-  const context = [catalogContext, definitionContext, rowContext, documentContext ? `DOCUMENT CONTEXT:\n${documentContext}` : ""].filter(Boolean).join("\n\n");
+  const context = [catalogContext, rowContext, documentContext ? `DOCUMENT CONTEXT:\n${documentContext}` : ""].filter(Boolean).join("\n\n");
   const system = `You are the Semantic Layer business and finance assistant. Answer in clear normal language, not SQL, JSON, or code. Use only the supplied governed catalog and retrieved dataset context for claims about uploaded data. Never invent figures, entities, dates, formulas, or financial conclusions. If the context is insufficient, say exactly what is missing and ask one concise clarification question. Explain business or finance terms whenever the user asks what a term means. For calculations, show the assumptions and say when a result is an estimate. Treat generated definitions as pending review and mention that limitation for material decisions. General conversation is allowed, but business/data answers must stay grounded.\n\nGOVERNED CONTEXT:\n${context || "No dataset has been uploaded yet."}`;
   const response = await invokeLLM({
     messages: [
       { role: "system", content: system },
-      ...messages.filter(message => message.role !== "system").slice(-12),
+      ...messages.filter(message => message.role !== "system").slice(-6),
     ],
-    maxTokens: 900,
+    maxTokens: 600,
   });
   const content = response.choices[0]?.message.content;
   return typeof content === "string" ? content : "I could not produce a grounded answer. Please rephrase the question.";

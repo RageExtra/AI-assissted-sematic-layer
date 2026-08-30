@@ -692,6 +692,7 @@ export async function handleDocumentUpload(name: string, fileType: string, base6
     
     if (documentDocs.length > 0) {
       await db.collection("unstructured_docs").insertMany(documentDocs);
+      await db.collection("unstructured_docs").createIndex({ text: "text" }, { name: "unstructured_text_search" });
     }
     
     return { success: true, chunksGenerated: documentDocs.length };
@@ -708,7 +709,12 @@ export async function queryUnstructuredDocuments(query: string, limit = 3): Prom
   
   const queryEmbedding = await embedText(query);
   
-  const allDocs = await db.collection("unstructured_docs").find({}).toArray();
+  let allDocs;
+  try {
+    allDocs = await db.collection("unstructured_docs").find({ $text: { $search: query } }, { projection: { text: 1, embedding: 1 } }).sort({ score: { $meta: "textScore" } }).limit(Math.max(limit * 8, 24)).toArray();
+  } catch {
+    allDocs = await db.collection("unstructured_docs").find({}, { projection: { text: 1, embedding: 1 } }).sort({ _id: -1 }).limit(160).toArray();
+  }
   if (allDocs.length === 0) return [];
   
   const scoredDocs = allDocs.map(doc => {

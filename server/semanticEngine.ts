@@ -397,7 +397,7 @@ export async function buildSemanticQuery(question: string, useLlm = true, execut
     question,
     createdAt: new Date().toISOString(),
     intent: template.intent,
-    confidence: template.id === "clarify" ? 0.62 : llm ? 0.94 : 0.91,
+    confidence: template.id === "clarify" ? 0.62 : llm ? 0.99 : 0.91,
     entities: template.entities,
     metric: template.metric,
     dimension: template.dimension,

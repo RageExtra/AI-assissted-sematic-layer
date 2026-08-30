@@ -212,10 +212,13 @@ const normalizeToolChoice = (
   return toolChoice;
 };
 
-const resolveApiUrl = () =>
-  ENV.openaiApiUrl && ENV.openaiApiUrl.trim().length > 0
-    ? `${ENV.openaiApiUrl.replace(/\/$/, "")}/chat/completions`
-    : "https://api.openai.com/v1/chat/completions";
+const resolveApiBaseUrl = () => {
+  const configured = ENV.openaiApiUrl?.trim().replace(/\/$/, "") || "https://api.openai.com/v1";
+  if (configured === "https://api.openai.com") return `${configured}/v1`;
+  return configured;
+};
+
+const resolveApiUrl = () => `${resolveApiBaseUrl()}/chat/completions`;
 
 const assertApiKey = () => {
   if (!ENV.openaiApiKey) {
@@ -359,12 +362,9 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
   } = params;
 
   const payload: Record<string, unknown> = {
+    model: model || ENV.openaiModel,
     messages: messages.map(normalizeMessage),
   };
-
-  if (model) {
-    payload.model = model;
-  }
 
   if (tools && tools.length > 0) {
     payload.tools = tools;
@@ -435,9 +435,7 @@ export type ModelsResponse = {
 export async function listLLMModels(): Promise<ModelsResponse> {
   assertApiKey();
 
-  const url = ENV.openaiApiUrl && ENV.openaiApiUrl.trim().length > 0
-    ? `${ENV.openaiApiUrl.replace(/\/$/, "")}/models`
-    : "https://api.openai.com/v1/models";
+  const url = `${resolveApiBaseUrl()}/models`;
 
   const response = await fetchWithBackoff(url, {
     headers: { authorization: `Bearer ${ENV.openaiApiKey}` },

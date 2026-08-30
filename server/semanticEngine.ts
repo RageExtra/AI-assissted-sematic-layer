@@ -605,11 +605,22 @@ export async function handleDatasetUpload(name: string, data: Record<string, any
 ﻿
 
 let extractorPipeline: any = null;
-async function getExtractor() {
-  if (!extractorPipeline) {
-    extractorPipeline = await pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2");
+async function embedText(text: string): Promise<number[]> {
+  try {
+    if (!extractorPipeline) extractorPipeline = await pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2");
+    const output = await extractorPipeline(text, { pooling: "mean", normalize: true });
+    return Array.from(output.data) as number[];
+  } catch (error) {
+    console.warn("[SemanticLayer] Embedding model unavailable; using lexical fallback.", error instanceof Error ? error.message : "unknown error");
+    const vector = new Array<number>(128).fill(0);
+    for (const token of text.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean)) {
+      let hash = 2166136261;
+      for (let index = 0; index < token.length; index += 1) hash = Math.imul(hash ^ token.charCodeAt(index), 16777619);
+      vector[Math.abs(hash) % vector.length] += 1;
+    }
+    const norm = Math.sqrt(vector.reduce((sum, value) => sum + value * value, 0));
+    return norm ? vector.map(value => value / norm) : vector;
   }
-  return extractorPipeline;
 }
 
 function cosineSimilarity(vecA: number[], vecB: number[]) {
@@ -643,28 +654,21 @@ export async function handleDocumentUpload(name: string, fileType: string, base6
       text = buffer.toString("utf8");
     }
     
-    // Simple chunking (split by double newline, keep chunks < 1000 chars)
-    const rawChunks = text.split(/\n\s*\n/);
+    text = text.replace(/\u0000/g, "").trim();
+    if (!text) throw new Error("No readable text was found in the document.");
+    if (text.length > 2_000_000) throw new Error("Document text is limited to 2 MB after extraction.");
+
     const chunks: string[] = [];
-    let currentChunk = "";
-    
-    for (const chunk of rawChunks) {
-      if (currentChunk.length + chunk.length > 1000) {
-        chunks.push(currentChunk.trim());
-        currentChunk = chunk;
-      } else {
-        currentChunk += "\n\n" + chunk;
-      }
+    for (let offset = 0; offset < text.length; offset += 900) {
+      const chunk = text.slice(offset, offset + 1_200).trim();
+      if (chunk) chunks.push(chunk);
     }
-    if (currentChunk.trim()) chunks.push(currentChunk.trim());
     
-    const extractor = await getExtractor();
     const documentDocs = [];
     
     for (const chunk of chunks) {
       if (!chunk) continue;
-      const output = await extractor(chunk, { pooling: 'mean', normalize: true });
-      const embedding = Array.from(output.data);
+      const embedding = await embedText(chunk);
       documentDocs.push({
         documentName: name,
         text: chunk,
@@ -678,8 +682,9 @@ export async function handleDocumentUpload(name: string, fileType: string, base6
     
     return { success: true, chunksGenerated: documentDocs.length };
   } catch (err) {
-    console.error("Document upload failed:", err);
-    throw new Error("Document upload failed");
+    const message = err instanceof Error ? err.message : "unknown extraction error";
+    console.error("Document upload failed:", message);
+    throw new Error(`Document upload failed: ${message}`);
   }
 }
 
@@ -687,9 +692,7 @@ export async function queryUnstructuredDocuments(query: string, limit = 3): Prom
   const db = await getDb();
   if (!db) return [];
   
-  const extractor = await getExtractor();
-  const output = await extractor(query, { pooling: 'mean', normalize: true });
-  const queryEmbedding = Array.from(output.data) as number[];
+  const queryEmbedding = await embedText(query);
   
   const allDocs = await db.collection("unstructured_docs").find({}).toArray();
   if (allDocs.length === 0) return [];

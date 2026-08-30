@@ -12,8 +12,8 @@ export function validateInterpretation(data: any): { ok: boolean; errors?: strin
 
   const checkDecimals = (obj: any, path: string = "") => {
     for (const [key, value] of Object.entries(obj)) {
-      if (typeof value === "number") {
-        errors.push(`Field "${path ? path + '.' : ''}${key}" is a floating-point number. Must be a decimal string.`);
+      if (typeof value === "number" && !Number.isInteger(value)) {
+        errors.push(`Field "${path ? path + '.' : ''}${key}" is a floating-point number. Must be a decimal string or integer.`);
       } else if (typeof value === "string" && !isNaN(Number(value)) && value.trim() !== "") {
         const decimalRegex = /^-?\d+(\.\d{2})?$/;
         if (!decimalRegex.test(value)) {

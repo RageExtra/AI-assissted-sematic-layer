@@ -532,38 +532,49 @@ export async function* streamLLM(params: InvokeParams): AsyncGenerator<string, v
 
           thinkTailBuffer += token;
           let output = "";
-          let i = 0;
-
-          while (i < thinkTailBuffer.length) {
-            if (!insideThinkBlock) {
-              const openIdx = thinkTailBuffer.indexOf("<think>", i);
-              if (openIdx === -1) {
-                output += thinkTailBuffer.slice(i);
-                i = thinkTailBuffer.length;
+          
+          while (thinkTailBuffer.length > 0) {
+            if (insideThinkBlock) {
+              const closeIdx = thinkTailBuffer.indexOf("</think>");
+              if (closeIdx !== -1) {
+                insideThinkBlock = false;
+                thinkTailBuffer = thinkTailBuffer.slice(closeIdx + "</think>".length);
               } else {
-                output += thinkTailBuffer.slice(i, openIdx);
-                insideThinkBlock = true;
-                i = openIdx + "<think>".length;
+                // Not found. Discard all but the last 7 chars (potential start of </think>)
+                if (thinkTailBuffer.length > 7) {
+                  thinkTailBuffer = thinkTailBuffer.slice(-7);
+                }
+                break;
               }
             } else {
-              const closeIdx = thinkTailBuffer.indexOf("</think>", i);
-              if (closeIdx === -1) {
-                i = thinkTailBuffer.length;
+              const openIdx = thinkTailBuffer.indexOf("<think>");
+              if (openIdx !== -1) {
+                output += thinkTailBuffer.slice(0, openIdx);
+                insideThinkBlock = true;
+                thinkTailBuffer = thinkTailBuffer.slice(openIdx + "<think>".length);
               } else {
-                insideThinkBlock = false;
-                i = closeIdx + "</think>".length;
+                // Not found. Flush all but the last 6 chars (potential start of <think>)
+                if (thinkTailBuffer.length > 6) {
+                  output += thinkTailBuffer.slice(0, -6);
+                  thinkTailBuffer = thinkTailBuffer.slice(-6);
+                }
+                break;
               }
             }
           }
-
-          // Keep only a small tail in case a tag spans chunk boundaries
-          thinkTailBuffer = thinkTailBuffer.slice(Math.max(0, thinkTailBuffer.length - "</think>".length));
 
           if (output) yield output;
         } catch (e) {
           // Ignore parse errors for partial lines
         }
       }
+    }
+  }
+
+  // Flush remaining buffer at the end of the stream
+  if (!insideThinkBlock && thinkTailBuffer) {
+    if (!thinkTailBuffer.includes("<think") && !thinkTailBuffer.includes("</think")) {
+      yield thinkTailBuffer;
     }
   }
 }

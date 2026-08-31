@@ -339,7 +339,7 @@ CRITICAL RULES:
        return parsed;
     }
 
-    const validation = validateInterpretation(parsed);
+    const validation = validateInterpretation(parsed, definitions);
     if (!validation.ok && parsed.intent !== "propose_definition") {
       console.warn("[SemanticLayer] LLM interpretation failed validation:", validation.errors);
       return {
@@ -559,13 +559,14 @@ export async function handleDocumentUpload(name: string, fileType: string, base6
     const lowerName = name.toLowerCase();
     if (fileType === "application/pdf" || lowerName.endsWith(".pdf")) {
       const pdfModule = await import("pdf-parse");
-      if (pdfModule.PDFParse) {
-        const parser = new pdfModule.PDFParse(new Uint8Array(buffer));
-        text = await parser.getText();
+      if ((pdfModule as any).PDFParse) {
+        const parser = new (pdfModule as any).PDFParse(new Uint8Array(buffer));
+        const res = await parser.getText();
+        text = typeof res === "string" ? res : (res?.text ?? "");
       } else {
         const pdfParse = (pdfModule as any).default || pdfModule;
         const data = await (typeof pdfParse === 'function' ? pdfParse(buffer) : pdfParse.default(buffer));
-        text = data.text;
+        text = typeof data === "string" ? data : (data?.text ?? "");
       }
     } else if (fileType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" || lowerName.endsWith(".docx")) {
       const mammoth = await import("mammoth");

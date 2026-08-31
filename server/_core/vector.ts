@@ -1,4 +1,4 @@
-﻿import { pipeline } from "@xenova/transformers";
+import { pipeline } from "@xenova/transformers";
 
 // Use a singleton for the pipeline
 let extractor: any = null;
@@ -24,10 +24,21 @@ export async function generateEmbedding(text: string): Promise<number[]> {
 }
 
 export function cosineSimilarity(vecA: number[], vecB: number[]): number {
-  if (vecA.length !== vecB.length || vecA.length === 0) return 0;
-  let dotProduct = 0;
-  for (let i = 0; i < vecA.length; i++) {
-    dotProduct += vecA[i] * vecB[i];
+  if (!vecA || !vecB || !Array.isArray(vecA) || !Array.isArray(vecB) || vecA.length !== vecB.length || vecA.length === 0) {
+    return 0;
   }
-  return dotProduct; // Already normalized
+  let dotProduct = 0;
+  let normA = 0;
+  let normB = 0;
+  for (let i = 0; i < vecA.length; i++) {
+    const valA = vecA[i] ?? 0;
+    const valB = vecB[i] ?? 0;
+    dotProduct += valA * valB;
+    normA += valA * valA;
+    normB += valB * valB;
+  }
+  if (normA === 0 || normB === 0) return 0;
+  const sim = dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+  return Number.isNaN(sim) || !Number.isFinite(sim) ? 0 : Math.max(-1, Math.min(1, sim));
 }
+

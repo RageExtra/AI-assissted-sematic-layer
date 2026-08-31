@@ -156,19 +156,9 @@ export default function Chat() {
     const result = job.result;
     if (!result) return;
     const fields = Object.keys(result.schema).slice(0, 6).join(", ");
-    appendMessage({ role: "assistant", content: `Your dataset is ready. I indexed **${result.rowCount.toLocaleString()} rows** across **${result.fieldCount} fields** and generated **${result.definitionsCreated} semantic definitions** for review.\\n\\nDetected fields include: ${fields}${result.fieldCount > 6 ? ", and more" : ""}. You can now ask questions such as “What was total revenue by region?” or “Explain EBITDA.”` });
+    appendMessage({ role: "assistant", content: `Your dataset is ready. I indexed **${result.rowCount.toLocaleString()} rows** across **${result.fieldCount} fields** and generated **${result.definitionsCreated} semantic definitions** for review.\n\nDetected fields include: ${fields}${result.fieldCount > 6 ? ", and more" : ""}. You can now ask questions such as “What was total revenue by region?” or “Explain EBITDA.”` });
   }, [datasetJobId, datasetJobQuery.data, handledJobId]);
 
-  const chatMutation = trpc.ai.chat.useMutation({
-    onSuccess: response => {
-      const answer = response.choices[0]?.message.content;
-      appendMessage({ role: "assistant", content: typeof answer === "string" ? answer : "I could not produce a grounded answer. Please rephrase your question." });
-    },
-    onError: error => appendMessage({ role: "assistant", content: `I could not complete that request. ${error.message}` }),
-  });
-
-  
-    
   const processFile = async (file: File): Promise<void> => {
     return new Promise((resolve, reject) => {
       if (file.size > 25 * 1024 * 1024) return reject(new Error("Files are limited to 25 MB."));
@@ -222,7 +212,7 @@ export default function Chat() {
     const nextMessages = [...currentMsgs, userMsg];
     
     setSessions(prev => {
-      const updated = prev.map(s => s.id === targetSessionId ? { ...s, messages: nextMessages, updatedAt: Date.now() } : s);
+      const updated = prev.map(s => s.id === targetSessionId ? { ...s, messages: [...s.messages, userMsg], updatedAt: Date.now() } : s);
       localStorage.setItem("semantic_chat_sessions", JSON.stringify(updated));
       return updated;
     });
@@ -235,16 +225,6 @@ export default function Chat() {
         return; // stop if upload fails
       }
     }
-    
-    const otherChatsContext = sessions
-      .filter(s => s.id !== targetSessionId && s.messages.length > 1)
-      .map(s => {
-        const title = s.messages.find(m => m.role === "user")?.content || "Previous Chat";
-        const msgContent = s.messages.slice(-6).map(m => `${m.role.toUpperCase()}: ${m.content}`).join("\n");
-        return `--- Chat: ${title} ---\n${msgContent}`;
-      })
-      .slice(-5)
-      .join("\n\n");
       
     setActiveStreams(prev => ({ ...prev, [targetSessionId]: { isStreaming: true, content: "" } }));
     
@@ -253,8 +233,7 @@ export default function Chat() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
-          messages: nextMessages,
-          otherChatsContext: otherChatsContext.length > 0 ? otherChatsContext : undefined
+          messages: nextMessages
         })
       });
       
@@ -267,7 +246,24 @@ export default function Chat() {
       
       while (true) {
         const { done, value } = await reader.read();
-        if (done) break;
+        if (done) {
+          if (buffer.trim()) {
+            const line = buffer.trim();
+            if (line.startsWith("data: ") && line !== "data: [DONE]") {
+              try {
+                const data = JSON.parse(line.slice(6));
+                if (data.content) {
+                  streamedContent += data.content;
+                  setActiveStreams(prev => ({ ...prev, [targetSessionId]: { isStreaming: true, content: streamedContent } }));
+                } else if (data.error) {
+                  streamedContent += "\n\nError: " + data.error;
+                  setActiveStreams(prev => ({ ...prev, [targetSessionId]: { isStreaming: true, content: streamedContent } }));
+                }
+              } catch (e) {}
+            }
+          }
+          break;
+        }
         buffer += decoder.decode(value, { stream: true });
         
         let newlineIndex;
@@ -290,22 +286,28 @@ export default function Chat() {
         }
       }
       
-            setSessions(prev => {
-        const updated = prev.map(s => s.id === targetSessionId ? { 
-          ...s, 
-          messages: [...nextMessages, { role: "assistant" as const, content: streamedContent || "I could not produce a grounded answer." }],
-          updatedAt: Date.now()
-        } : s);
+      setSessions(prev => {
+        const updated = prev.map(s => {
+          if (s.id !== targetSessionId) return s;
+          return { 
+            ...s, 
+            messages: [...s.messages, { role: "assistant" as const, content: streamedContent || "I could not produce a grounded answer." }],
+            updatedAt: Date.now()
+          };
+        });
         localStorage.setItem("semantic_chat_sessions", JSON.stringify(updated));
         return updated;
       });
     } catch (error) {
       setSessions(prev => {
-        const updated = prev.map(s => s.id === targetSessionId ? { 
-          ...s, 
-          messages: [...nextMessages, { role: "assistant" as const, content: `I could not complete that request. ${error instanceof Error ? error.message : "Unknown error"}` }],
-          updatedAt: Date.now()
-        } : s);
+        const updated = prev.map(s => {
+          if (s.id !== targetSessionId) return s;
+          return { 
+            ...s, 
+            messages: [...s.messages, { role: "assistant" as const, content: `I could not complete that request. ${error instanceof Error ? error.message : "Unknown error"}` }],
+            updatedAt: Date.now()
+          };
+        });
         localStorage.setItem("semantic_chat_sessions", JSON.stringify(updated));
         return updated;
       });
@@ -427,7 +429,7 @@ export default function Chat() {
           <AIChatBox
             messages={displayMessages}
             onSendMessage={handleSendMessage}
-            isLoading={chatMutation.isPending || !!currentStream?.isStreaming}
+            isLoading={!!currentStream?.isStreaming}
             height="100%"
             placeholder="Ask about your data or explain a business term..."
             

@@ -514,22 +514,44 @@ export async function createCollection(name: string, schema?: object, indexes?: 
 
 export async function getRelevantDefinitions(question: string): Promise<SemanticDefinition[]> {
   const all = await listDefinitions();
-  const q = question.toLowerCase();
+  if (!question || typeof question !== "string" || all.length === 0) {
+    return all.slice(0, 10);
+  }
   
-  // Lightweight Hybrid RAG keyword filtering
-  // If no specific keywords match, we return a core subset to prevent context bloat
-  const filtered = all.filter(def => {
-    const term = def.name.toLowerCase();
-    const desc = def.description.toLowerCase();
+  const q = question.toLowerCase().trim();
+  const queryTokens = q.split(/[^a-z0-9_]+/).filter(w => w.length >= 2);
+  
+  const scored = all.map(def => {
+    const name = def.name.toLowerCase();
+    const desc = (def.description || "").toLowerCase();
+    const aliases = (def.aliases || []).map(a => a.toLowerCase());
     
-    // Split question into words and check if any significant word matches
-    const words = q.split(/\W+/).filter(w => w.length > 3);
-    const matches = words.some(w => term.includes(w) || desc.includes(w));
+    let score = 0;
     
-    return matches || term.includes("revenue") || term.includes("customer"); 
+    // Check direct substring matches
+    if (name.includes(q) || q.includes(name)) score += 10;
+    if (aliases.some(a => a.length >= 2 && (q.includes(a) || a.includes(q)))) score += 8;
+    if (desc.includes(q)) score += 3;
+    
+    // Check token overlaps
+    for (const token of queryTokens) {
+      if (name === token) score += 6;
+      else if (name.split(/[^a-z0-9_]+/).includes(token)) score += 4;
+      else if (name.includes(token)) score += 2;
+      
+      if (aliases.some(a => a === token)) score += 6;
+      else if (aliases.some(a => a.split(/[^a-z0-9_]+/).includes(token))) score += 4;
+      else if (aliases.some(a => a.includes(token))) score += 2;
+      
+      if (desc.split(/[^a-z0-9_]+/).includes(token)) score += 2;
+      else if (desc.includes(token)) score += 1;
+    }
+    
+    return { def, score };
   });
   
-  return filtered.length > 0 ? filtered : all.slice(0, 5);
+  const matched = scored.filter(s => s.score > 0).sort((a, b) => b.score - a.score).map(s => s.def);
+  return matched.length > 0 ? matched : all.slice(0, 8);
 }
 
 export async function createDraftDefinition(term: string, description: string): Promise<void> {

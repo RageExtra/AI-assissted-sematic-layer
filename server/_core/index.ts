@@ -57,26 +57,41 @@ async function startServer() {
   });
   
   app.post("/api/chat/stream", async (req, res) => {
+    const controller = new AbortController();
+    const abortHandler = () => controller.abort();
+    req.on("close", abortHandler);
+    req.on("aborted", abortHandler);
+
     try {
-      const { messages, otherChatsContext } = req.body;
+      const { messages } = req.body;
       if (!messages || !Array.isArray(messages)) return res.status(400).json({ error: "Invalid messages" });
       
       res.setHeader("Content-Type", "text/event-stream");
       res.setHeader("Cache-Control", "no-cache");
       res.setHeader("Connection", "keep-alive");
+      res.setHeader("X-Accel-Buffering", "no");
+      res.flushHeaders();
       
       const { streamBusinessQuestion } = await import("../datasetEngine.js");
-      const stream = streamBusinessQuestion(messages, otherChatsContext);
+      const stream = streamBusinessQuestion(messages, undefined, controller.signal);
       
       for await (const chunk of stream) {
+        if (controller.signal.aborted) break;
         res.write(`data: ${JSON.stringify({ content: chunk })}\n\n`);
       }
-      res.write("data: [DONE]\n\n");
-      res.end();
+      if (!controller.signal.aborted) {
+        res.write("data: [DONE]\n\n");
+        res.end();
+      }
     } catch (error) {
-      console.error("Stream error:", error);
-      res.write(`data: ${JSON.stringify({ error: String(error) })}\n\n`);
-      res.end();
+      if (!controller.signal.aborted) {
+        console.error("Stream error:", error);
+        res.write(`data: ${JSON.stringify({ error: String(error) })}\n\n`);
+        res.end();
+      }
+    } finally {
+      req.off("close", abortHandler);
+      req.off("aborted", abortHandler);
     }
   });
 

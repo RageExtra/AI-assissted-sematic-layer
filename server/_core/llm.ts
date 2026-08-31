@@ -19,7 +19,7 @@ export type FileContent = {
   type: "file_url";
   file_url: {
     url: string;
-    mime_type?: "audio/mpeg" | "audio/wav" | "application/pdf" | "audio/mp4" | "video/mp4" ;
+    mime_type?: "audio/mpeg" | "audio/wav" | "application/pdf" | "audio/mp4" | "video/mp4";
   };
 };
 
@@ -69,6 +69,7 @@ export type InvokeParams = {
   model?: string;
   thinking?: Record<string, unknown>;
   reasoning?: Record<string, unknown>;
+  signal?: AbortSignal;
 };
 
 export type ToolCall = {
@@ -333,6 +334,9 @@ const fetchWithBackoff = async (
   let lastError: unknown;
 
   for (let attempt = 0; attempt <= RETRY_MAX_RETRIES; attempt++) {
+    if (init.signal?.aborted) {
+      throw init.signal.reason || new Error("Operation aborted");
+    }
     try {
       const response = await fetch(url, init);
       if (response.ok || attempt === RETRY_MAX_RETRIES || (response.status >= 400 && response.status < 500 && response.status !== 429)) {
@@ -352,6 +356,9 @@ const fetchWithBackoff = async (
       );
       await sleep(computeBackoffDelay(attempt, retryAfterMs));
     } catch (error) {
+      if (init.signal?.aborted || (error instanceof Error && error.name === "AbortError")) {
+        throw error;
+      }
       lastError = error;
       if (attempt === RETRY_MAX_RETRIES) throw error;
       console.warn(
@@ -383,6 +390,7 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
     reasoning,
     maxTokens,
     max_tokens,
+    signal,
   } = params;
 
   const payload: Record<string, unknown> = {
@@ -432,6 +440,7 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
       authorization: `Bearer ${ENV.openaiApiKey}`,
     },
     body: JSON.stringify(payload),
+    signal,
   });
 
   if (!response.ok) {
@@ -475,7 +484,6 @@ export async function listLLMModels(): Promise<ModelsResponse> {
   return (await response.json()) as ModelsResponse;
 }
 
-
 function stripThinkBlocks(text: string): string {
   return text.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
 }
@@ -500,6 +508,7 @@ export async function* streamLLM(params: InvokeParams): AsyncGenerator<string, v
       Authorization: `Bearer ${ENV.openaiApiKey}`,
     },
     body: JSON.stringify(payload),
+    signal: params.signal,
   });
 
   if (!response.ok) {
@@ -571,10 +580,27 @@ export async function* streamLLM(params: InvokeParams): AsyncGenerator<string, v
     }
   }
 
+  // Feature 9: End-of-stream flush of any residual chunk in buffer
+  if (buffer.trim()) {
+    const line = buffer.trim();
+    if (line.startsWith("data: ") && line !== "data: [DONE]") {
+      try {
+        const data = JSON.parse(line.slice(6));
+        const token: string = data.choices?.[0]?.delta?.content ?? "";
+        if (token) {
+          thinkTailBuffer += token;
+        }
+      } catch (e) {
+        // Ignore parse errors
+      }
+    }
+  }
+
   // Flush remaining buffer at the end of the stream
   if (!insideThinkBlock && thinkTailBuffer) {
     if (!thinkTailBuffer.includes("<think") && !thinkTailBuffer.includes("</think")) {
       yield thinkTailBuffer;
+      thinkTailBuffer = "";
     }
   }
 }

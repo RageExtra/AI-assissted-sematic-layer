@@ -277,7 +277,7 @@ class SDKServer {
     }
 
     if (session.openId.startsWith(CRON_OPEN_ID_PREFIX)) {
-      const userInfo = await this.getUserInfoWithJwt(sessionToken ?? "");
+      const userInfo = !ENV.oAuthServerUrl ? ({ taskUid: "mock_cron_task", openId: session.openId, name: session.name } as any) : await this.getUserInfoWithJwt(sessionToken ?? "");
       const taskUid = userInfo.taskUid ?? null;
       if (!taskUid) {
         throw ForbiddenError("Cron session missing task_uid");
@@ -292,7 +292,7 @@ class SDKServer {
     // If user not in DB, sync from OAuth server automatically
     if (!user) {
       try {
-        const userInfo = await this.getUserInfoWithJwt(sessionToken ?? "");
+        const userInfo = !ENV.oAuthServerUrl ? ({ openId: session.openId, name: session.name, email: "local@example.com", loginMethod: "mock", platform: "mock" } as any) : await this.getUserInfoWithJwt(sessionToken ?? "");
         await db.upsertUser({
           openId: userInfo.openId,
           name: userInfo.name || null,

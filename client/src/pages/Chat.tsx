@@ -1,6 +1,6 @@
 import { AIChatBox, type Message } from "@/components/AIChatBox";
 import { trpc } from "@/lib/trpc";
-import { Network, History, Plus, Trash2, Clock, ChevronRight, MessageSquare } from "lucide-react";
+import { Network, History, Plus, Trash2, Clock, ChevronRight, MessageSquare , Menu} from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { useEffect, useState, type ChangeEvent } from "react";
@@ -131,6 +131,7 @@ export default function Chat() {
   };
   const [datasetJobId, setDatasetJobId] = useState<string | null>(null);
   const [handledJobId, setHandledJobId] = useState<string | null>(null);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const datasetJobQuery = trpc.semantic.datasetJob.useQuery(
     { jobId: datasetJobId ?? "00000000-0000-0000-0000-000000000000" },
     { enabled: Boolean(datasetJobId), refetchInterval: datasetJobId ? 1000 : false },
@@ -215,49 +216,93 @@ export default function Chat() {
   };
 
   return (
-    <div className="flex min-h-screen flex-col bg-[#f5f4ef] text-[#112235]">
-      <header className="flex h-[72px] shrink-0 items-center justify-between border-b border-[#dfe3df] bg-[#faf9f5]/95 px-5 backdrop-blur sm:px-8">
-        <div className="flex items-center gap-3">
-          <div className="grid size-9 place-items-center rounded-xl bg-[#dff0e6] text-[#143f31]"><Network className="size-5" /></div>
-          <div><p className="text-sm font-semibold tracking-tight">Semantic Layer</p><p className="text-[10px] uppercase tracking-[0.18em] text-[#75818a]">Business intelligence assistant</p></div>
+    <div className="flex h-screen bg-[#f5f4ef] text-[#112235] overflow-hidden">
+      {/* Desktop Sidebar */}
+      <div className="hidden w-[280px] shrink-0 flex-col border-r border-[#dfe3df] bg-[#faf9f5] sm:flex">
+        <div className="flex h-[72px] shrink-0 items-center gap-3 px-5 border-b border-[#dfe3df]">
+          <div className="grid size-9 place-items-center rounded-xl bg-[#dff0e6] text-[#143f31]">
+            <Network className="size-5" />
+          </div>
+          <div>
+            <p className="text-sm font-semibold tracking-tight">Semantic Layer</p>
+            <p className="text-[10px] uppercase tracking-[0.18em] text-[#75818a]">Assistant</p>
+          </div>
         </div>
-        <div className="flex items-center gap-4">
-          <Sheet>
+        
+        <div className="p-3">
+          <Button variant="outline" className="w-full justify-start gap-2 bg-white" onClick={createNewChat}>
+            <Plus className="size-4" /> New Chat
+          </Button>
+        </div>
+        
+        <div className="flex-1 overflow-y-auto p-3 pt-0 flex flex-col gap-1">
+          <p className="px-2 py-1.5 text-xs font-semibold text-[#8a969b]">Recent Chats</p>
+          {sessions.map(session => (
+            <button
+              key={session.id}
+              onClick={() => switchChat(session.id)}
+              className={`group flex items-center justify-between rounded-lg px-3 py-2.5 text-left transition-colors ${session.id === currentSessionId ? 'bg-[#edf4ef] text-[#143f31]' : 'hover:bg-[#f5f7f5] text-[#39505a]'}`}
+            >
+              <div className="flex min-w-0 flex-1 items-center gap-3">
+                <MessageSquare className="size-4 shrink-0 text-[#68767e]" />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium">
+                    {session.messages.find(m => m.role === 'user')?.content || 'New Conversation'}
+                  </p>
+                </div>
+              </div>
+              <Trash2 
+                className="size-4 shrink-0 text-[#94a1a6] opacity-0 transition-opacity hover:text-red-500 group-hover:opacity-100" 
+                onClick={(e) => deleteChat(session.id, e)} 
+              />
+            </button>
+          ))}
+        </div>
+        
+        <div className="p-4 border-t border-[#dfe3df] bg-[#f5f4ef]/50">
+           <a href="/admin" className="flex items-center gap-2 text-sm font-semibold text-[#68767e] transition-colors hover:text-[#112235]">
+             <History className="size-4" /> Background workspace &rarr;
+           </a>
+        </div>
+      </div>
+      
+      {/* Main Chat Area */}
+      <div className="flex flex-1 flex-col overflow-hidden">
+        {/* Mobile Header */}
+        <header className="flex h-[72px] shrink-0 items-center justify-between border-b border-[#dfe3df] bg-[#faf9f5]/95 px-5 backdrop-blur sm:hidden">
+          <div className="flex items-center gap-3">
+            <div className="grid size-9 place-items-center rounded-xl bg-[#dff0e6] text-[#143f31]"><Network className="size-5" /></div>
+            <p className="text-sm font-semibold tracking-tight">Semantic Layer</p>
+          </div>
+          
+          <Sheet open={isMobileMenuOpen} onOpenChange={setIsMobileMenuOpen}>
             <SheetTrigger asChild>
-              <button className="flex items-center gap-1.5 text-xs font-semibold text-[#68767e] transition-colors hover:text-[#112235]">
-                <History className="size-4" />
-                History
+              <button className="grid size-9 place-items-center rounded-lg hover:bg-[#e9eeeb]">
+                <Menu className="size-5 text-[#39505a]" />
               </button>
             </SheetTrigger>
-            <SheetContent side="right" className="w-[340px] p-0 sm:w-[400px]">
-              <SheetHeader className="border-b border-[#dfe3df] p-5">
-                <SheetTitle className="flex items-center justify-between text-base">
-                  Chat History
-                  <Button variant="outline" size="sm" onClick={createNewChat} className="h-8 gap-1.5 text-xs">
-                    <Plus className="size-3.5" /> New Chat
-                  </Button>
-                </SheetTitle>
-              </SheetHeader>
-              <div className="flex flex-col gap-1 overflow-y-auto p-3 h-[calc(100vh-80px)]">
+            <SheetContent side="left" className="w-[280px] p-0 flex flex-col bg-[#faf9f5]">
+              <div className="p-3 border-b border-[#dfe3df]">
+                <Button variant="outline" className="w-full justify-start gap-2 bg-white" onClick={() => { createNewChat(); setIsMobileMenuOpen(false); }}>
+                  <Plus className="size-4" /> New Chat
+                </Button>
+              </div>
+              <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-1">
+                <p className="px-2 py-1.5 text-xs font-semibold text-[#8a969b]">Recent Chats</p>
                 {sessions.map(session => (
                   <button
                     key={session.id}
-                    onClick={() => switchChat(session.id)}
-                    className={`group flex items-center justify-between rounded-lg px-3 py-3 text-left transition-colors ${session.id === currentSessionId ? 'bg-[#edf4ef] text-[#143f31]' : 'hover:bg-[#f5f7f5] text-[#39505a]'}`}
+                    onClick={() => { switchChat(session.id); setIsMobileMenuOpen(false); }}
+                    className={`group flex items-center justify-between rounded-lg px-3 py-2.5 text-left transition-colors ${session.id === currentSessionId ? 'bg-[#edf4ef] text-[#143f31]' : 'hover:bg-[#f5f7f5] text-[#39505a]'}`}
                   >
                     <div className="flex min-w-0 flex-1 items-center gap-3">
                       <MessageSquare className="size-4 shrink-0 text-[#68767e]" />
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium">
-                          {session.messages.find(m => m.role === 'user')?.content || 'New Conversation'}
-                        </p>
-                        <p className="text-[10px] text-[#8a969b]">
-                          {new Date(session.updatedAt).toLocaleString()}
-                        </p>
-                      </div>
+                      <p className="truncate text-sm font-medium">
+                        {session.messages.find(m => m.role === 'user')?.content || 'New Conversation'}
+                      </p>
                     </div>
                     <Trash2 
-                      className="size-4 shrink-0 text-[#94a1a6] opacity-0 transition-opacity hover:text-red-500 group-hover:opacity-100" 
+                      className="size-4 shrink-0 text-[#94a1a6]" 
                       onClick={(e) => deleteChat(session.id, e)} 
                     />
                   </button>
@@ -265,22 +310,22 @@ export default function Chat() {
               </div>
             </SheetContent>
           </Sheet>
-          <a href="/admin" className="text-xs font-semibold text-[#68767e] transition-colors hover:text-[#112235]">Background workspace &rarr;</a>
-        </div>
-      </header>
-      <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col px-3 py-3 sm:px-6 sm:py-6">
-        <AIChatBox
-          messages={messages}
-          onSendMessage={handleSendMessage}
-          isLoading={chatMutation.isPending}
-          height="calc(100vh - 120px)"
-          placeholder="Ask about your data or explain a business term…"
-          onFileUpload={handleFileUpload}
-          isUploadingFile={uploadMutation.isPending || uploadDocumentMutation.isPending}
-          emptyStateMessage="Upload a dataset or start a conversation"
-          suggestedPrompts={["What fields are in my dataset?", "Explain EBITDA in simple terms", "What revenue trends can you find?"]}
-        />
-      </main>
+        </header>
+        
+        <main className="flex-1 w-full mx-auto max-w-4xl px-3 py-3 sm:px-6 sm:py-6 overflow-hidden flex flex-col">
+          <AIChatBox
+            messages={messages}
+            onSendMessage={handleSendMessage}
+            isLoading={chatMutation.isPending}
+            height="100%"
+            placeholder="Ask about your data or explain a business term..."
+            onFileUpload={handleFileUpload}
+            isUploadingFile={uploadMutation.isPending || uploadDocumentMutation.isPending}
+            emptyStateMessage="Upload a dataset or start a conversation"
+            suggestedPrompts={["What fields are in my dataset?", "Explain EBITDA in simple terms", "What revenue trends can you find?"]}
+          />
+        </main>
+      </div>
     </div>
   );
 }

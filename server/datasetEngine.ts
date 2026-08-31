@@ -249,12 +249,17 @@ export async function answerBusinessQuestion(messages: Array<{ role: "user" | "a
   if (quickReply) return lastQuestion.toLowerCase().startsWith("thank") ? "You’re welcome. Upload a business or finance file whenever you’re ready, and I’ll help you explore or explain it." : "Hello. I can analyze uploaded business and finance data, explain terminology, and answer grounded questions in normal language. Upload a file or ask me anything to get started.";
 
   const db = await getDb();
+  
+  // Align RAG properly by including previous conversational context
+  const userMessages = messages.filter(m => m.role === "user").map(m => m.content);
+  const searchContext = userMessages.slice(-2).join(" ");
+  
   const [catalogContext, datasetDocs, unstructuredDocs] = await Promise.all([
     getCatalogContext(),
-    db ? findRelevantDatasetDocuments(lastQuestion) : Promise.resolve([]),
-    db ? queryUnstructuredDocuments(lastQuestion, 5) : Promise.resolve([])
+    db ? findRelevantDatasetDocuments(searchContext) : Promise.resolve([]),
+    db ? queryUnstructuredDocuments(searchContext, 5) : Promise.resolve([])
   ]);
-  const retrieved = retrieveRows(lastQuestion, datasetDocs.map(document => ({ text: String(document.text), row: document.row as Row })));
+  const retrieved = retrieveRows(searchContext, datasetDocs.map(document => ({ text: String(document.text), row: document.row as Row })));
   const documentContext = unstructuredDocs.join("\n");
   const rowContext = retrieved.map(document => document.text).join("\n");
   const context = [catalogContext, rowContext, documentContext ? `DOCUMENT CONTEXT:\n${documentContext}` : ""].filter(Boolean).join("\n\n");

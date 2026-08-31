@@ -335,7 +335,7 @@ const fetchWithBackoff = async (
   for (let attempt = 0; attempt <= RETRY_MAX_RETRIES; attempt++) {
     try {
       const response = await fetch(url, init);
-      if (response.ok || attempt === RETRY_MAX_RETRIES) {
+      if (response.ok || attempt === RETRY_MAX_RETRIES || (response.status >= 400 && response.status < 500 && response.status !== 429)) {
         return response;
       }
 

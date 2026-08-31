@@ -30,11 +30,15 @@ function validateMqlPipeline(pipeline: any[]): { valid: boolean; error?: string 
 }
 
 export async function generateAndExecuteMql(question: string, catalogContext: string, kgContext: string): Promise<string> {
-  const system = `You are a MongoDB MQL generator.
-Based on the user's question, the provided catalog schema, and the knowledge graph, generate a valid MongoDB Aggregation Pipeline to query the dataset.
-The collection name is implicitly the dataset collection.
-Output ONLY a JSON object with a 'pipeline' array, and a 'collection' string (if you can infer it from the catalog). Do not output markdown code blocks. Just raw JSON.
-If the question cannot be answered by MQL (e.g. general chat or asks about unstructured text), output {"pipeline": null}.`;
+  const system = `You are a MongoDB aggregation pipeline generator for a business analytics tool.
+The user's data is stored in a MongoDB collection. Your job is to generate a JSON aggregation pipeline to answer their question.
+
+Rules:
+1. Output ONLY a raw JSON object with "pipeline" (array) and optionally "collection" (string). No markdown, no explanation.
+2. If the question is conversational, vague, or cannot be answered with data (e.g. "hi", "what is revenue?"), output: {"pipeline": null}
+3. Use only $match, $group, $sort, $project, $count, $limit, $addFields, $unwind — no write operations.
+4. Always include a $limit stage (max 50 rows).
+5. Infer field names from the catalog schema provided.`;
 
   const prompt = `Catalog/Schema:\n${catalogContext}\n\nKnowledge Graph:\n${kgContext}\n\nQuestion: ${question}\n\nGenerate JSON:`;
 
@@ -60,7 +64,7 @@ If the question cannot be answered by MQL (e.g. general chat or asks about unstr
     if (!parsed.pipeline) return "No MQL generated (not applicable).";
     
     const validation = validateMqlPipeline(parsed.pipeline);
-    if (!validation.valid) return `SQL/MQL Validation Failed: ${validation.error}`;
+    if (!validation.valid) return ""; // Silently skip invalid pipelines
     
     // Execution
     const db = await getDb();
@@ -73,12 +77,13 @@ If the question cannot be answered by MQL (e.g. general chat or asks about unstr
       if (datasets.length > 0) targetCollection = datasets[0].collectionName;
     }
     
-    if (!targetCollection) return "No target collection identified.";
+    if (!targetCollection) return ""; // No data uploaded yet
     
     const results = await db.collection(targetCollection).aggregate(parsed.pipeline).toArray();
     return `SQL/MQL Execution Success. Results: ${JSON.stringify(results.slice(0, 20))}`;
     
   } catch (error) {
-    return `SQL/MQL Execution Error: ${error instanceof Error ? error.message : "Unknown error"}`;
+    console.error("MQL execution error:", error);
+    return ""; // Silently skip failed MQL - RAG context will still be used
   }
 }

@@ -1,9 +1,9 @@
 import { generateAndExecuteMql } from "./mqlEngine.js";
 import { generateEmbedding, cosineSimilarity } from "./_core/vector.js";
 import { insertKnowledgeGraphEdges, searchKnowledgeGraph } from "./knowledgeGraph.js";
-import { invokeLLM } from "./_core/llm";
-import { getDb, createCollection, createDefinition } from "./db";
-import { queryUnstructuredDocuments } from "./semanticEngine";
+import { invokeLLM, streamLLM } from "./_core/llm.js";
+import { getDb, createCollection, createDefinition } from "./db.js";
+import { queryUnstructuredDocuments } from "./semanticEngine.js";
 
 const MAX_ROWS = 10_000;
 const MAX_FIELDS = 120;
@@ -249,7 +249,7 @@ export async function answerBusinessQuestion(messages: Array<{ role: "user" | "a
   const lastQuestion = [...messages].reverse().find(message => message.role === "user")?.content?.trim();
   if (!lastQuestion) throw new Error("A user question is required.");
     const quickReply = /^(hi|hello|hey|good morning|good afternoon|good evening|thanks|thank you|help|what can you do)[!.? ]*$/i.test(lastQuestion);
-  if (quickReply) return lastQuestion.toLowerCase().startsWith("thank") ? "You’re welcome. Upload a business or finance file whenever you’re ready, and I’ll help you explore or explain it." : "Hello. I can analyze uploaded business and finance data, explain terminology, and answer grounded questions in normal language. Upload a file or ask me anything to get started.";
+  if (quickReply) return lastQuestion.toLowerCase().startsWith("thank") ? "You're welcome. Upload a business or finance file whenever you’re ready, and I'll help you explore or explain it." : "Hello. I can analyze uploaded business and finance data, explain terminology, and answer grounded questions in normal language. Upload a file or ask me anything to get started.";
 
   const db = await getDb();
   
@@ -290,7 +290,6 @@ ${context || "No dataset has been uploaded yet."}`;
   return typeof content === "string" ? content : "I could not produce a grounded answer. Please rephrase the question.";
 }
 
-import { streamLLM } from "./_core/llm.js";
 
 export async function* streamBusinessQuestion(messages: Array<{ role: "user" | "assistant" | "system"; content: string }>, otherChatsContext?: string): AsyncGenerator<string, void, unknown> {
   const lastQuestion = [...messages].reverse().find(message => message.role === "user")?.content?.trim();

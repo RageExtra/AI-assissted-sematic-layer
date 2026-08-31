@@ -50,8 +50,7 @@ function parseDelimited(text: string, delimiter: "," | "\t") {
 export default function Chat() {
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState<string>("");
-  const [messages, setMessages] = useState<Message[]>([]);
-
+  
   useEffect(() => {
     const saved = localStorage.getItem("semantic_chat_sessions");
     if (saved) {
@@ -60,8 +59,7 @@ export default function Chat() {
         if (parsed.length > 0) {
           setSessions(parsed);
           setCurrentSessionId(parsed[0].id);
-          setMessages(parsed[0].messages);
-          return;
+                    return;
         }
       } catch (e) {}
     }
@@ -69,22 +67,17 @@ export default function Chat() {
     setCurrentSessionId(id);
     const initial = { id, updatedAt: Date.now(), messages: [DEFAULT_MESSAGE] };
     setSessions([initial]);
-    setMessages([DEFAULT_MESSAGE]);
-  }, []);
+      }, []);
 
   const appendMessage = (msg: Message) => {
-    setMessages(prev => {
-      const next = [...prev, msg];
-      setSessions(prevSessions => {
-        const updated = prevSessions.map(s => s.id === currentSessionId ? { ...s, updatedAt: Date.now(), messages: next } : s);
-        if (!prevSessions.find(s => s.id === currentSessionId)) {
-          updated.push({ id: currentSessionId, updatedAt: Date.now(), messages: next });
-        }
-        updated.sort((a, b) => b.updatedAt - a.updatedAt);
-        localStorage.setItem("semantic_chat_sessions", JSON.stringify(updated));
-        return updated;
-      });
-      return next;
+    setSessions(prevSessions => {
+      const updated = prevSessions.map(s => s.id === currentSessionId ? { ...s, updatedAt: Date.now(), messages: [...s.messages, msg] } : s);
+      if (!prevSessions.find(s => s.id === currentSessionId)) {
+        updated.push({ id: currentSessionId, updatedAt: Date.now(), messages: [DEFAULT_MESSAGE, msg] });
+      }
+      updated.sort((a, b) => b.updatedAt - a.updatedAt);
+      localStorage.setItem("semantic_chat_sessions", JSON.stringify(updated));
+      return updated;
     });
   };
 
@@ -97,15 +90,13 @@ export default function Chat() {
       localStorage.setItem("semantic_chat_sessions", JSON.stringify(updated));
       return updated;
     });
-    setMessages([DEFAULT_MESSAGE]);
-  };
+      };
 
   const switchChat = (id: string) => {
     const session = sessions.find(s => s.id === id);
     if (session) {
       setCurrentSessionId(session.id);
-      setMessages(session.messages);
-    }
+          }
   };
 
   const deleteChat = (id: string, e: React.MouseEvent) => {
@@ -116,13 +107,11 @@ export default function Chat() {
       if (currentSessionId === id) {
         if (updated.length > 0) {
           setCurrentSessionId(updated[0].id);
-          setMessages(updated[0].messages);
-        } else {
+                  } else {
           const newId = crypto.randomUUID();
           setCurrentSessionId(newId);
           const initial = { id: newId, updatedAt: Date.now(), messages: [DEFAULT_MESSAGE] };
-          setMessages([DEFAULT_MESSAGE]);
-          updated.push(initial);
+                    updated.push(initial);
           localStorage.setItem("semantic_chat_sessions", JSON.stringify(updated));
         }
       }
@@ -132,6 +121,7 @@ export default function Chat() {
   const [datasetJobId, setDatasetJobId] = useState<string | null>(null);
   const [handledJobId, setHandledJobId] = useState<string | null>(null);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [activeStreams, setActiveStreams] = useState<Record<string, { isStreaming: boolean, content: string }>>({});
   const datasetJobQuery = trpc.semantic.datasetJob.useQuery(
     { jobId: datasetJobId ?? "00000000-0000-0000-0000-000000000000" },
     { enabled: Boolean(datasetJobId), refetchInterval: datasetJobId ? 1000 : false },
@@ -174,48 +164,71 @@ export default function Chat() {
       const answer = response.choices[0]?.message.content;
       appendMessage({ role: "assistant", content: typeof answer === "string" ? answer : "I could not produce a grounded answer. Please rephrase your question." });
     },
-    onError: error => setMessages(previous => [...previous, { role: "assistant", content: `I could not complete that request. ${error.message}` }]),
+    onError: error => appendMessage({ role: "assistant", content: `I could not complete that request. ${error.message}` }),
   });
 
-  const handleFileUpload = (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    event.target.value = "";
-    if (!file) return;
-    if (file.size > MAX_FILE_BYTES) { toast.error("Files are limited to 25 MB."); return; }
-    const lowerName = file.name.toLowerCase();
-
-    if (lowerName.endsWith(".json") || lowerName.endsWith(".csv") || lowerName.endsWith(".tsv")) {
-      const reader = new FileReader();
-      reader.onload = () => {
-        try {
-          const raw = String(reader.result ?? "");
-          const data = lowerName.endsWith(".json") ? JSON.parse(raw) : parseDelimited(raw, lowerName.endsWith(".tsv") ? "\t" : ",");
-          if (!Array.isArray(data)) throw new Error("JSON must contain an array of row objects.");
-          uploadMutation.mutate({ name: file.name, data });
-        } catch (error) {
-          toast.error(error instanceof Error ? error.message : "Could not parse the file.");
-        }
-      };
-      reader.readAsText(file);
-      return;
-    }
-
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = String(reader.result ?? "");
-      const base64Data = result.includes(",") ? result.split(",", 2)[1] : result;
-      uploadDocumentMutation.mutate({ name: file.name, fileType: file.type || "application/octet-stream", base64Data });
-    };
-    reader.readAsDataURL(file);
+  
+    
+  const processFile = async (file: File): Promise<void> => {
+    return new Promise((resolve, reject) => {
+      if (file.size > 25 * 1024 * 1024) return reject(new Error("Files are limited to 25 MB."));
+      const lowerName = file.name.toLowerCase();
+      
+      if (lowerName.endsWith(".json") || lowerName.endsWith(".csv") || lowerName.endsWith(".tsv")) {
+        const reader = new FileReader();
+        reader.onload = async () => {
+          try {
+            const raw = String(reader.result ?? "");
+            const data = lowerName.endsWith(".json") ? JSON.parse(raw) : parseDelimited(raw, lowerName.endsWith(".tsv") ? "\t" : ",");
+            if (!Array.isArray(data)) throw new Error("JSON must contain an array of row objects.");
+            await uploadMutation.mutateAsync({ name: file.name, data });
+            resolve();
+          } catch (error) {
+            reject(error instanceof Error ? error : new Error("Could not parse the file."));
+          }
+        };
+        reader.readAsText(file);
+      } else {
+        const reader = new FileReader();
+        reader.onload = async () => {
+          try {
+            const result = String(reader.result ?? "");
+            const base64Data = result.includes(",") ? result.split(",", 2)[1] : result;
+            await uploadDocumentMutation.mutateAsync({ name: file.name, fileType: file.type || "application/octet-stream", base64Data });
+            resolve();
+          } catch(e) {
+            reject(e instanceof Error ? e : new Error("Could not upload document."));
+          }
+        };
+        reader.readAsDataURL(file);
+      }
+    });
   };
 
-    const handleSendMessage = (content: string) => {
-    const nextMessages = [...messages, { role: "user" as const, content }];
-    setMessages(nextMessages);
+  const handleSendMessage = async (content: string, stagedFile?: File | null) => {
+    if (stagedFile) {
+      try {
+        await processFile(stagedFile);
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "File upload failed");
+        return;
+      }
+    }
     
-    // Create context from other chats
+    if (!content.trim()) return;
+
+    const targetSessionId = currentSessionId;
+    const currentMsgs = sessions.find(s => s.id === targetSessionId)?.messages || [DEFAULT_MESSAGE];
+    const nextMessages = [...currentMsgs, { role: "user" as const, content }];
+    
+    setSessions(prev => {
+      const updated = prev.map(s => s.id === targetSessionId ? { ...s, messages: nextMessages, updatedAt: Date.now() } : s);
+      localStorage.setItem("semantic_chat_sessions", JSON.stringify(updated));
+      return updated;
+    });
+    
     const otherChatsContext = sessions
-      .filter(s => s.id !== currentSessionId && s.messages.length > 1)
+      .filter(s => s.id !== targetSessionId && s.messages.length > 1)
       .map(s => {
         const title = s.messages.find(m => m.role === "user")?.content || "Previous Chat";
         const msgContent = s.messages.slice(-6).map(m => `${m.role.toUpperCase()}: ${m.content}`).join("\n");
@@ -224,11 +237,85 @@ export default function Chat() {
       .slice(-5)
       .join("\n\n");
       
-    chatMutation.mutate({ 
-      messages: nextMessages,
-      otherChatsContext: otherChatsContext.length > 0 ? otherChatsContext : undefined
-    });
+    setActiveStreams(prev => ({ ...prev, [targetSessionId]: { isStreaming: true, content: "" } }));
+    
+    try {
+      const response = await fetch("/api/chat/stream", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+          messages: nextMessages,
+          otherChatsContext: otherChatsContext.length > 0 ? otherChatsContext : undefined
+        })
+      });
+      
+      if (!response.ok || !response.body) throw new Error("Stream failed");
+      
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let streamedContent = "";
+      let buffer = "";
+      
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        
+        let newlineIndex;
+        while ((newlineIndex = buffer.indexOf("\n")) >= 0) {
+          const line = buffer.slice(0, newlineIndex).trim();
+          buffer = buffer.slice(newlineIndex + 1);
+          
+          if (line.startsWith("data: ") && line !== "data: [DONE]") {
+            try {
+              const data = JSON.parse(line.slice(6));
+              if (data.content) {
+                streamedContent += data.content;
+                setActiveStreams(prev => ({ ...prev, [targetSessionId]: { isStreaming: true, content: streamedContent } }));
+              } else if (data.error) {
+                streamedContent += "\n\nError: " + data.error;
+                setActiveStreams(prev => ({ ...prev, [targetSessionId]: { isStreaming: true, content: streamedContent } }));
+              }
+            } catch (e) {}
+          }
+        }
+      }
+      
+            setSessions(prev => {
+        const updated = prev.map(s => s.id === targetSessionId ? { 
+          ...s, 
+          messages: [...nextMessages, { role: "assistant" as const, content: streamedContent || "I could not produce a grounded answer." }],
+          updatedAt: Date.now()
+        } : s);
+        localStorage.setItem("semantic_chat_sessions", JSON.stringify(updated));
+        return updated;
+      });
+    } catch (error) {
+      setSessions(prev => {
+        const updated = prev.map(s => s.id === targetSessionId ? { 
+          ...s, 
+          messages: [...nextMessages, { role: "assistant" as const, content: `I could not complete that request. ${error instanceof Error ? error.message : "Unknown error"}` }],
+          updatedAt: Date.now()
+        } : s);
+        localStorage.setItem("semantic_chat_sessions", JSON.stringify(updated));
+        return updated;
+      });
+    } finally {
+      setActiveStreams(prev => {
+        const next = { ...prev };
+        delete next[targetSessionId];
+        return next;
+      });
+    }
   };
+
+  
+  const currentSession = sessions.find(s => s.id === currentSessionId);
+  const currentMessages = currentSession?.messages || [DEFAULT_MESSAGE];
+  const currentStream = activeStreams[currentSessionId];
+  const displayMessages = currentStream?.isStreaming && currentStream.content 
+    ? [...currentMessages, { role: "assistant" as const, content: currentStream.content }] 
+    : currentMessages;
 
   return (
     <div className="flex h-screen bg-[#f5f4ef] text-[#112235] overflow-hidden">
@@ -329,12 +416,12 @@ export default function Chat() {
         
         <main className="flex-1 w-full mx-auto max-w-4xl px-3 py-3 sm:px-6 sm:py-6 overflow-hidden flex flex-col">
           <AIChatBox
-            messages={messages}
+            messages={displayMessages}
             onSendMessage={handleSendMessage}
-            isLoading={chatMutation.isPending}
+            isLoading={chatMutation.isPending || !!currentStream?.isStreaming}
             height="100%"
             placeholder="Ask about your data or explain a business term..."
-            onFileUpload={handleFileUpload}
+            
             isUploadingFile={uploadMutation.isPending || uploadDocumentMutation.isPending}
             emptyStateMessage="Upload a dataset or start a conversation"
             suggestedPrompts={["What fields are in my dataset?", "Explain EBITDA in simple terms", "What revenue trends can you find?"]}

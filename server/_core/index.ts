@@ -55,7 +55,33 @@ async function startServer() {
       return res.status(500).json({ error: error instanceof Error ? error.message : String(error), context: { url: req.originalUrl }, timestamp: new Date().toISOString() });
     }
   });
+  
+  app.post("/api/chat/stream", async (req, res) => {
+    try {
+      const { messages, otherChatsContext } = req.body;
+      if (!messages || !Array.isArray(messages)) return res.status(400).json({ error: "Invalid messages" });
+      
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
+      
+      const { streamBusinessQuestion } = await import("../datasetEngine.js");
+      const stream = streamBusinessQuestion(messages, otherChatsContext);
+      
+      for await (const chunk of stream) {
+        res.write(`data: ${JSON.stringify({ content: chunk })}\n\n`);
+      }
+      res.write("data: [DONE]\n\n");
+      res.end();
+    } catch (error) {
+      console.error("Stream error:", error);
+      res.write(`data: ${JSON.stringify({ error: String(error) })}\n\n`);
+      res.end();
+    }
+  });
+
   // tRPC API
+
   app.use(
     "/api/trpc",
     createExpressMiddleware({

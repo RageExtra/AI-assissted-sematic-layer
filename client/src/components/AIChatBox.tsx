@@ -15,7 +15,7 @@ export type Message = {
 };
 
 export type AIChatBoxProps = {
-  onFileUpload?: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  
   isUploadingFile?: boolean;
   /**
    * Messages array to display in the chat.
@@ -27,7 +27,7 @@ export type AIChatBoxProps = {
    * Callback when user sends a message.
    * Typically you'll call a tRPC mutation here to invoke the LLM.
    */
-  onSendMessage: (content: string) => void;
+  onSendMessage: (content: string, file?: File | null) => void;
 
   /**
    * Whether the AI is currently generating a response
@@ -118,13 +118,14 @@ export function AIChatBox({
   isLoading = false,
   placeholder = "Type your message...",
   className,
-  onFileUpload,
+  
   isUploadingFile,
   height = "600px",
   emptyStateMessage = "Start a conversation with AI",
   suggestedPrompts,
 }: AIChatBoxProps) {
   const [input, setInput] = useState("");
+  const [stagedFile, setStagedFile] = useState<File | null>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const inputAreaRef = useRef<HTMLFormElement>(null);
@@ -172,16 +173,23 @@ export function AIChatBox({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const trimmedInput = input.trim();
-    if (!trimmedInput || isLoading) return;
+    if (!trimmedInput && !stagedFile) return;
+    if (isLoading || isUploadingFile) return;
 
-    onSendMessage(trimmedInput);
+    onSendMessage(trimmedInput, stagedFile);
     setInput("");
+    setStagedFile(null);
 
-    // Scroll immediately after sending
     scrollToBottom();
-
-    // Keep focus on input
     textareaRef.current?.focus();
+  };
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setStagedFile(file);
+    }
+    e.target.value = "";
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -307,44 +315,59 @@ export function AIChatBox({
       </div>
 
       {/* Input Area */}
+      {/* Input Area */}
       <form
         ref={inputAreaRef}
         onSubmit={handleSubmit}
-        className="flex gap-2 p-4 border-t bg-background/50 items-end"
+        className="flex flex-col gap-2 p-4 border-t bg-background/50"
       >
-        {onFileUpload && (
+        {stagedFile && (
+          <div className="flex items-center gap-2 bg-muted p-2 rounded-md max-w-fit mb-2">
+            <Paperclip className="size-4 text-muted-foreground" />
+            <span className="text-sm truncate max-w-[200px] font-medium">{stagedFile.name}</span>
+            <button 
+              type="button" 
+              onClick={() => setStagedFile(null)} 
+              className="text-muted-foreground hover:text-foreground ml-2"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+            </button>
+          </div>
+        )}
+        <div className="flex gap-2 items-end">
           <div className="shrink-0 flex items-center justify-center">
-            <input type="file" id="chat-file-upload" accept="*/*" className="hidden" onChange={onFileUpload} disabled={isUploadingFile} />
+            <input type="file" id="chat-file-upload" accept="*/*" className="hidden" onChange={handleFileSelect} disabled={isUploadingFile || isLoading} />
             <label htmlFor="chat-file-upload">
-              <Button type="button" variant="outline" size="icon" className="h-[38px] w-[38px] cursor-pointer" disabled={isUploadingFile} asChild>
+              <Button type="button" variant="outline" size="icon" className="h-[38px] w-[38px] cursor-pointer" disabled={isUploadingFile || isLoading} asChild>
                 <span>
                   {isUploadingFile ? <Loader2 className="size-4 animate-spin" /> : <Paperclip className="size-4" />}
                 </span>
               </Button>
             </label>
           </div>
-        )}
-        <Textarea
-          ref={textareaRef}
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder={placeholder}
-          className="flex-1 max-h-32 resize-none min-h-9"
-          rows={1}
-        />
-        <Button
-          type="submit"
-          size="icon"
-          disabled={!input.trim() || isLoading}
-          className="shrink-0 h-[38px] w-[38px]"
-        >
-          {isLoading ? (
-            <Loader2 className="size-4 animate-spin" />
-          ) : (
-            <Send className="size-4" />
-          )}
-        </Button>
+          
+          <Textarea
+            ref={textareaRef}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder={placeholder}
+            className="flex-1 max-h-32 resize-none min-h-9"
+            rows={1}
+          />
+          <Button
+            type="submit"
+            size="icon"
+            disabled={(!input.trim() && !stagedFile) || isLoading || isUploadingFile}
+            className="shrink-0 h-[38px] w-[38px]"
+          >
+            {isLoading || isUploadingFile ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <Send className="size-4" />
+            )}
+          </Button>
+        </div>
       </form>
     </div>
   );

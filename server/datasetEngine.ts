@@ -276,3 +276,48 @@ ${context || "No dataset has been uploaded yet."}`;
   const content = response.choices[0]?.message.content;
   return typeof content === "string" ? content : "I could not produce a grounded answer. Please rephrase the question.";
 }
+
+import { streamLLM } from "./_core/llm.js";
+
+export async function* streamBusinessQuestion(messages: Array<{ role: "user" | "assistant" | "system"; content: string }>, otherChatsContext?: string): AsyncGenerator<string, void, unknown> {
+  const lastQuestion = [...messages].reverse().find(message => message.role === "user")?.content?.trim();
+  if (!lastQuestion) throw new Error("A user question is required.");
+  
+  const quickReply = /^(hi|hello|hey|good morning|good afternoon|good evening|thanks|thank you|help|what can you do)[!.? ]*$/i.test(lastQuestion);
+  if (quickReply) {
+    yield lastQuestion.toLowerCase().startsWith("thank") ? "You're welcome. Upload a business or finance file whenever you're ready, and I'll help you explore or explain it." : "Hello. I can analyze uploaded business and finance data, explain terminology, and answer grounded questions in normal language. Upload a file or ask me anything to get started.";
+    return;
+  }
+
+  const db = await getDb();
+  
+  const searchContext = messages.map(m => m.content).slice(-4).join("\n");
+  
+  const [catalogContext, datasetDocs, unstructuredDocs] = await Promise.all([
+    getCatalogContext(),
+    db ? findRelevantDatasetDocuments(searchContext) : Promise.resolve([]),
+    db ? queryUnstructuredDocuments(searchContext, 5) : Promise.resolve([])
+  ]);
+  
+  const retrieved = retrieveRows(searchContext, datasetDocs.map(document => ({ text: String(document.text), row: document.row as any })));
+  const documentContext = unstructuredDocs.join("\n");
+  const rowContext = retrieved.map(document => document.text).join("\n");
+  const context = [catalogContext, rowContext, documentContext ? `DOCUMENT CONTEXT:\n${documentContext}` : ""].filter(Boolean).join("\n\n");
+  
+  const system = `You are the Semantic Layer business and finance assistant. Answer in clear normal language, not SQL, JSON, or code. Use only the supplied governed catalog and retrieved dataset context for claims about uploaded data. Never invent figures, entities, dates, formulas, or financial conclusions. If the context is insufficient, say exactly what is missing and ask one concise clarification question. Explain business or finance terms whenever the user asks what a term means. For calculations, show the assumptions and say when a result is an estimate. Treat generated definitions as pending review and mention that limitation for material decisions. General conversation is allowed, but business/data answers must stay grounded. When the user asks about or clarifies a specific entity (like a sale or customer), provide comprehensive details about it from the retrieved context instead of just confirming its existence.
+
+${otherChatsContext ? `PAST CHAT HISTORY CONTEXT (Use for reference if the user refers to past conversations):\n${otherChatsContext}\n\n` : "" }GOVERNED CONTEXT:
+${context || "No dataset has been uploaded yet."}`;
+
+  const stream = streamLLM({
+    messages: [
+      { role: "system", content: system },
+      ...messages.filter(message => message.role !== "system"),
+    ],
+    maxTokens: 1024,
+  });
+  
+  for await (const chunk of stream) {
+    yield chunk;
+  }
+}

@@ -474,3 +474,58 @@ export async function listLLMModels(): Promise<ModelsResponse> {
 
   return (await response.json()) as ModelsResponse;
 }
+
+export async function* streamLLM(params: InvokeParams): AsyncGenerator<string, void, unknown> {
+  assertApiKey();
+  const payload: Record<string, unknown> = {
+    model: params.model || await resolveChatModel(),
+    messages: params.messages.map(normalizeMessage),
+    stream: true,
+  };
+  
+  const resolvedMaxTokens = params.maxTokens ?? params.max_tokens;
+  if (typeof resolvedMaxTokens === "number") {
+    payload.max_tokens = resolvedMaxTokens;
+  }
+
+  const response = await fetchWithBackoff(resolveApiUrl(), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${ENV.openaiApiKey}`,
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`LLM stream failed: ${response.status} ${response.statusText} - ${errorText}`);
+  }
+
+  if (!response.body) throw new Error("No response body");
+
+  // Type assertion for node-fetch/undici stream compatibility in Node environment
+  const stream = response.body as unknown as AsyncIterable<Uint8Array>;
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  for await (const chunk of stream) {
+    buffer += decoder.decode(chunk, { stream: true });
+    let newlineIndex;
+    while ((newlineIndex = buffer.indexOf("\n")) >= 0) {
+      const line = buffer.slice(0, newlineIndex).trim();
+      buffer = buffer.slice(newlineIndex + 1);
+      
+      if (line.startsWith("data: ") && line !== "data: [DONE]") {
+        try {
+          const data = JSON.parse(line.slice(6));
+          if (data.choices?.[0]?.delta?.content) {
+            yield data.choices[0].delta.content;
+          }
+        } catch (e) {
+          // Ignore parse errors for partial lines
+        }
+      }
+    }
+  }
+}

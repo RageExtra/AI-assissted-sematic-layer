@@ -256,15 +256,25 @@ export async function answerBusinessQuestion(messages: Array<{ role: "user" | "a
   // Align RAG properly by including previous conversational context
   const searchContext = messages.map(m => m.content).slice(-4).join("\n");
   
-  const [catalogContext, datasetDocs, unstructuredDocs] = await Promise.all([
+  const [catalogContext, datasetDocs, unstructuredDocs, kgContext] = await Promise.all([
     getCatalogContext(),
     db ? findRelevantDatasetDocuments(searchContext) : Promise.resolve([]),
-    db ? queryUnstructuredDocuments(searchContext, 5) : Promise.resolve([])
+    db ? queryUnstructuredDocuments(searchContext, 5) : Promise.resolve([]),
+    db ? searchKnowledgeGraph(searchContext) : Promise.resolve([])
   ]);
   const retrieved = retrieveRows(searchContext, datasetDocs.map(document => ({ text: String(document.text), row: document.row as Row })));
   const documentContext = unstructuredDocs.join("\n");
   const rowContext = retrieved.map(document => document.text).join("\n");
-  const context = [catalogContext, rowContext, documentContext ? `DOCUMENT CONTEXT:\n${documentContext}` : ""].filter(Boolean).join("\n\n");
+  const kgContextString = typeof kgContext !== "undefined" ? kgContext.map((edge: any) => `${edge.source} -> ${edge.relation} -> ${edge.target}`).join("\n") : "";
+  const executionContext = typeof kgContext !== "undefined" ? await generateAndExecuteMql(searchContext, catalogContext, kgContextString) : "";
+  
+  const context = [
+    catalogContext, 
+    rowContext, 
+    documentContext ? `DOCUMENT CONTEXT:\n${documentContext}` : "",
+    `KNOWLEDGE GRAPH:\n${kgContextString}`,
+    `DATABASE EXECUTION RESULT:\n${executionContext}`
+  ].filter(Boolean).join("\n\n");
   const system = `You are the Semantic Layer business and finance assistant. Answer in clear normal language, not SQL, JSON, or code. Use only the supplied governed catalog and retrieved dataset context for claims about uploaded data. Never invent figures, entities, dates, formulas, or financial conclusions. If the context is insufficient, say exactly what is missing and ask one concise clarification question. Explain business or finance terms whenever the user asks what a term means. For calculations, show the assumptions and say when a result is an estimate. Treat generated definitions as pending review and mention that limitation for material decisions. General conversation is allowed, but business/data answers must stay grounded. When the user asks about or clarifies a specific entity (like a sale or customer), provide comprehensive details about it from the retrieved context instead of just confirming its existence.
 
 ${otherChatsContext ? `PAST CHAT HISTORY CONTEXT (Use for reference if the user refers to past conversations):\n${otherChatsContext}\n\n` : "" }GOVERNED CONTEXT:
@@ -296,16 +306,26 @@ export async function* streamBusinessQuestion(messages: Array<{ role: "user" | "
   
   const searchContext = messages.map(m => m.content).slice(-4).join("\n");
   
-  const [catalogContext, datasetDocs, unstructuredDocs] = await Promise.all([
+  const [catalogContext, datasetDocs, unstructuredDocs, kgContext] = await Promise.all([
     getCatalogContext(),
     db ? findRelevantDatasetDocuments(searchContext) : Promise.resolve([]),
-    db ? queryUnstructuredDocuments(searchContext, 5) : Promise.resolve([])
+    db ? queryUnstructuredDocuments(searchContext, 5) : Promise.resolve([]),
+    db ? searchKnowledgeGraph(searchContext) : Promise.resolve([])
   ]);
   
   const retrieved = retrieveRows(searchContext, datasetDocs.map(document => ({ text: String(document.text), row: document.row as any })));
   const documentContext = unstructuredDocs.join("\n");
   const rowContext = retrieved.map(document => document.text).join("\n");
-  const context = [catalogContext, rowContext, documentContext ? `DOCUMENT CONTEXT:\n${documentContext}` : ""].filter(Boolean).join("\n\n");
+  const kgContextString = typeof kgContext !== "undefined" ? kgContext.map((edge: any) => `${edge.source} -> ${edge.relation} -> ${edge.target}`).join("\n") : "";
+  const executionContext = typeof kgContext !== "undefined" ? await generateAndExecuteMql(searchContext, catalogContext, kgContextString) : "";
+  
+  const context = [
+    catalogContext, 
+    rowContext, 
+    documentContext ? `DOCUMENT CONTEXT:\n${documentContext}` : "",
+    `KNOWLEDGE GRAPH:\n${kgContextString}`,
+    `DATABASE EXECUTION RESULT:\n${executionContext}`
+  ].filter(Boolean).join("\n\n");
   
   const system = `You are the Semantic Layer business and finance assistant. Answer in clear normal language, not SQL, JSON, or code. Use only the supplied governed catalog and retrieved dataset context for claims about uploaded data. Never invent figures, entities, dates, formulas, or financial conclusions. If the context is insufficient, say exactly what is missing and ask one concise clarification question. Explain business or finance terms whenever the user asks what a term means. For calculations, show the assumptions and say when a result is an estimate. Treat generated definitions as pending review and mention that limitation for material decisions. General conversation is allowed, but business/data answers must stay grounded. When the user asks about or clarifies a specific entity (like a sale or customer), provide comprehensive details about it from the retrieved context instead of just confirming its existence.
 

@@ -646,10 +646,9 @@ export async function handleDocumentUpload(name: string, fileType: string, base6
     
     const lowerName = name.toLowerCase();
     if (fileType === "application/pdf" || lowerName.endsWith(".pdf")) {
-      const { PDFParse } = await import("pdf-parse");
-      const parser = new PDFParse({ data: buffer });
-      const data = await parser.getText();
-      await parser.destroy();
+      const pdfModule = await import("pdf-parse");
+      const pdfParse = (pdfModule as any).default || pdfModule;
+      const data = await pdfParse(buffer);
       text = data.text;
     } else if (fileType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" || lowerName.endsWith(".docx")) {
       const mammoth = await import("mammoth");

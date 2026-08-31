@@ -26,7 +26,7 @@ export const appRouter = router({
       .input(z.object({
         messages: z.array(z.object({
           role: z.enum(["system", "user", "assistant"]),
-          content: z.string().trim().min(1).max(2_000)
+          content: z.string().trim().min(1).max(100_000)
         })).min(1).max(24)
       }))
       .mutation(async ({ input }) => {

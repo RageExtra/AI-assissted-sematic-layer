@@ -314,7 +314,6 @@ ${context || "No dataset has been uploaded yet."}`;
       { role: "system", content: system },
       ...messages.filter(message => message.role !== "system"),
     ],
-    maxTokens: 1024,
   });
   
   for await (const chunk of stream) {

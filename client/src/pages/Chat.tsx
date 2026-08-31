@@ -132,7 +132,7 @@ export default function Chat() {
       setDatasetJobId(data.jobId);
       setHandledJobId(null);
       toast.success("Dataset upload received; background indexing started.");
-      appendMessage({ role: "assistant", content: "I received the dataset and started background indexing. I will let you know when its schema and semantic definitions are ready." });
+      
     },
     onError: error => toast.error(error.message || "Dataset upload failed."),
   });
@@ -140,7 +140,7 @@ export default function Chat() {
   const uploadDocumentMutation = trpc.semantic.uploadDocument.useMutation({
     onSuccess: data => {
       toast.success(`Document indexed: ${data.chunksGenerated} chunks`);
-      appendMessage({ role: "assistant", content: `I indexed **${data.chunksGenerated} searchable document sections**. Ask me to explain a term or find a policy, definition, or business rule from the uploaded material.` });
+      
     },
     onError: error => toast.error(error.message || "Document upload failed."),
   });
@@ -206,26 +206,35 @@ export default function Chat() {
   };
 
   const handleSendMessage = async (content: string, stagedFile?: File | null) => {
-    if (stagedFile) {
-      try {
-        await processFile(stagedFile);
-      } catch (e) {
-        toast.error(e instanceof Error ? e.message : "File upload failed");
-        return;
-      }
+    let finalContent = content.trim();
+    if (!finalContent && stagedFile) {
+      finalContent = "I have uploaded a file: " + stagedFile.name;
     }
-    
-    if (!content.trim()) return;
+    if (!finalContent) return;
 
     const targetSessionId = currentSessionId;
     const currentMsgs = sessions.find(s => s.id === targetSessionId)?.messages || [DEFAULT_MESSAGE];
-    const nextMessages = [...currentMsgs, { role: "user" as const, content }];
+    const userMsg = { 
+      role: "user" as const, 
+      content: finalContent,
+      ...(stagedFile ? { attachmentName: stagedFile.name } : {})
+    };
+    const nextMessages = [...currentMsgs, userMsg];
     
     setSessions(prev => {
       const updated = prev.map(s => s.id === targetSessionId ? { ...s, messages: nextMessages, updatedAt: Date.now() } : s);
       localStorage.setItem("semantic_chat_sessions", JSON.stringify(updated));
       return updated;
     });
+
+    if (stagedFile) {
+      try {
+        await processFile(stagedFile);
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "File upload failed");
+        return; // stop if upload fails
+      }
+    }
     
     const otherChatsContext = sessions
       .filter(s => s.id !== targetSessionId && s.messages.length > 1)

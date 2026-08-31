@@ -12,6 +12,7 @@ import { Streamdown } from "streamdown";
 export type Message = {
   role: "system" | "user" | "assistant";
   content: string;
+  attachmentName?: string;
 };
 
 export type AIChatBoxProps = {
@@ -277,9 +278,17 @@ export function AIChatBox({
                           <Streamdown>{message.content}</Streamdown>
                         </div>
                       ) : (
-                        <p className="whitespace-pre-wrap text-sm">
-                          {message.content}
-                        </p>
+                        <>
+                          {message.attachmentName && (
+                            <div className="flex items-center gap-2 bg-primary-foreground/10 text-primary-foreground p-2 rounded-md max-w-fit mb-2">
+                              <Paperclip className="size-4" />
+                              <span className="text-xs truncate max-w-[200px] font-medium">{message.attachmentName}</span>
+                            </div>
+                          )}
+                          <p className="whitespace-pre-wrap text-sm">
+                            {message.content}
+                          </p>
+                        </>
                       )}
                     </div>
 

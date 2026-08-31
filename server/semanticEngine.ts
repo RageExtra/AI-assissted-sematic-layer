@@ -1,7 +1,7 @@
-import { pipeline } from "@xenova/transformers";
 import { invokeLLM, listLLMModels } from "./_core/llm";
+import { generateEmbedding, cosineSimilarity } from "./_core/vector";
 import type { GroundingItem, QueryIntent, SemanticQueryRun, SqlSafety } from "../shared/semantic";
-import { getDb, listDefinitions, getRelevantDefinitions, createDraftDefinition, createDefinition } from "./db";
+import { getDb, listDefinitions, getRelevantDefinitions, createDraftDefinition } from "./db";
 import { ensureDemoCommerceData } from "./demoData";
 import { validateInterpretation } from "./validation";
 import { getCachedQuery, cacheQuery } from "./cache";
@@ -522,6 +522,7 @@ export async function getDemoHistory(): Promise<SemanticQueryRun[]> {
   ];
   return Promise.all(questions.map(question => buildSemanticQuery(question, false, true)));
 }
+
 let prewarmTimer: ReturnType<typeof setInterval> | undefined;
 
 export function startCachePreWarming() {
@@ -547,95 +548,6 @@ export function startCachePreWarming() {
   prewarmTimer.unref?.();
 }
 
-﻿
-
-export async function handleDatasetUpload(name: string, data: Record<string, any>[]): Promise<{ success: boolean; definitionsCreated: number }> {
-  try {
-    const db = await getDb();
-    if (!db) throw new Error("Database unavailable");
-    
-    // Create new collection
-    const collectionName = `dataset_${Date.now()}`;
-    if (data.length > 0) {
-      await db.collection(collectionName).insertMany(data);
-    }
-    
-    // Auto schema generation
-    let definitionsCreated = 0;
-    if (data.length > 0) {
-      const firstRow = data[0];
-      for (const [key, value] of Object.entries(firstRow)) {
-        if (typeof value === "number") {
-          await createDefinition({
-            kind: "metric",
-            name: `${name} ${key}`,
-            description: `Auto-generated metric for ${key} from uploaded dataset ${name}`,
-            expression: `${collectionName}.${key}`,
-            aliases: [key.toLowerCase(), key],
-            evidence: ["Auto Schema Generator"],
-            status: "approved",
-            version: 1,
-            rationale: "Dynamically extracted from user upload."
-          });
-          definitionsCreated++;
-        } else if (typeof value === "string") {
-          await createDefinition({
-            kind: "dimension",
-            name: `${name} ${key}`,
-            description: `Auto-generated dimension for ${key} from uploaded dataset ${name}`,
-            expression: `${collectionName}.${key}`,
-            aliases: [key.toLowerCase(), key],
-            evidence: ["Auto Schema Generator"],
-            status: "approved",
-            version: 1,
-            rationale: "Dynamically extracted from user upload."
-          });
-          definitionsCreated++;
-        }
-      }
-    }
-    
-    return { success: true, definitionsCreated };
-  } catch (error) {
-    console.error("[SemanticLayer] Dataset upload failed", error);
-    throw new Error("Dataset upload failed");
-  }
-}
-
-﻿
-
-let extractorPipeline: any = null;
-async function embedText(text: string): Promise<number[]> {
-  try {
-    if (!extractorPipeline) extractorPipeline = await pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2");
-    const output = await extractorPipeline(text, { pooling: "mean", normalize: true });
-    return Array.from(output.data) as number[];
-  } catch (error) {
-    console.warn("[SemanticLayer] Embedding model unavailable; using lexical fallback.", error instanceof Error ? error.message : "unknown error");
-    const vector = new Array<number>(128).fill(0);
-    for (const token of text.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean)) {
-      let hash = 2166136261;
-      for (let index = 0; index < token.length; index += 1) hash = Math.imul(hash ^ token.charCodeAt(index), 16777619);
-      vector[Math.abs(hash) % vector.length] += 1;
-    }
-    const norm = Math.sqrt(vector.reduce((sum, value) => sum + value * value, 0));
-    return norm ? vector.map(value => value / norm) : vector;
-  }
-}
-
-function cosineSimilarity(vecA: number[], vecB: number[]) {
-  let dotProduct = 0;
-  let normA = 0;
-  let normB = 0;
-  for (let i = 0; i < vecA.length; i++) {
-    dotProduct += vecA[i] * vecB[i];
-    normA += vecA[i] * vecA[i];
-    normB += vecB[i] * vecB[i];
-  }
-  if (normA === 0 || normB === 0) return 0;
-  return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
-}
-
 export async function handleDocumentUpload(name: string, fileType: string, base64Data: string) {
   try {
     const db = await getDb();
@@ -647,9 +559,14 @@ export async function handleDocumentUpload(name: string, fileType: string, base6
     const lowerName = name.toLowerCase();
     if (fileType === "application/pdf" || lowerName.endsWith(".pdf")) {
       const pdfModule = await import("pdf-parse");
-      const pdfParse = (pdfModule as any).default || pdfModule;
-      const data = await pdfParse(buffer);
-      text = data.text;
+      if (pdfModule.PDFParse) {
+        const parser = new pdfModule.PDFParse(new Uint8Array(buffer));
+        text = await parser.getText();
+      } else {
+        const pdfParse = (pdfModule as any).default || pdfModule;
+        const data = await (typeof pdfParse === 'function' ? pdfParse(buffer) : pdfParse.default(buffer));
+        text = data.text;
+      }
     } else if (fileType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" || lowerName.endsWith(".docx")) {
       const mammoth = await import("mammoth");
       const data = await mammoth.extractRawText({ buffer });
@@ -659,9 +576,9 @@ export async function handleDocumentUpload(name: string, fileType: string, base6
       const workbook = XLSX.read(buffer, { type: "buffer", cellDates: true });
       text = workbook.SheetNames.map(sheetName => {
         const sheet = workbook.Sheets[sheetName];
-        return `Sheet: ${sheetName}\\n${XLSX.utils.sheet_to_csv(sheet)}`;
-      }).join("\\n\\n");
-    } else if (fileType.startsWith("text/") || /\\.(txt|md|csv|tsv|json|xml|html|log|yaml|yml)$/i.test(lowerName)) {
+        return `Sheet: ${sheetName}\n${XLSX.utils.sheet_to_csv(sheet)}`;
+      }).join("\n\n");
+    } else if (fileType.startsWith("text/") || /\.(txt|md|csv|tsv|json|xml|html|log|yaml|yml)$/i.test(lowerName)) {
       text = buffer.toString("utf8");
     } else {
       text = `Attachment metadata: ${name}. MIME type: ${fileType || "unknown"}. This binary attachment was accepted and stored, but no text extractor is configured for its contents yet.`;
@@ -681,7 +598,7 @@ export async function handleDocumentUpload(name: string, fileType: string, base6
     
     for (const chunk of chunks) {
       if (!chunk) continue;
-      const embedding = await embedText(chunk);
+      const embedding = await generateEmbedding(chunk);
       documentDocs.push({
         documentName: name,
         text: chunk,
@@ -706,7 +623,7 @@ export async function queryUnstructuredDocuments(query: string, limit = 3): Prom
   const db = await getDb();
   if (!db) return [];
   
-  const queryEmbedding = await embedText(query);
+  const queryEmbedding = await generateEmbedding(query);
   
   let allDocs;
   try {

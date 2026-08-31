@@ -245,15 +245,17 @@ async function findRelevantDatasetDocuments(question: string) {
 export async function answerBusinessQuestion(messages: Array<{ role: "user" | "assistant" | "system"; content: string }>) {
   const lastQuestion = [...messages].reverse().find(message => message.role === "user")?.content?.trim();
   if (!lastQuestion) throw new Error("A user question is required.");
-  if (lastQuestion.length > 2_000) throw new Error("Questions are limited to 2,000 characters.");
-  const quickReply = /^(hi|hello|hey|good morning|good afternoon|good evening|thanks|thank you|help|what can you do)[!.? ]*$/i.test(lastQuestion);
+    const quickReply = /^(hi|hello|hey|good morning|good afternoon|good evening|thanks|thank you|help|what can you do)[!.? ]*$/i.test(lastQuestion);
   if (quickReply) return lastQuestion.toLowerCase().startsWith("thank") ? "You’re welcome. Upload a business or finance file whenever you’re ready, and I’ll help you explore or explain it." : "Hello. I can analyze uploaded business and finance data, explain terminology, and answer grounded questions in normal language. Upload a file or ask me anything to get started.";
 
   const db = await getDb();
-  const catalogContext = await getCatalogContext();
-  const datasetDocs = db ? await findRelevantDatasetDocuments(lastQuestion) : [];
+  const [catalogContext, datasetDocs, unstructuredDocs] = await Promise.all([
+    getCatalogContext(),
+    db ? findRelevantDatasetDocuments(lastQuestion) : Promise.resolve([]),
+    db ? queryUnstructuredDocuments(lastQuestion, 5) : Promise.resolve([])
+  ]);
   const retrieved = retrieveRows(lastQuestion, datasetDocs.map(document => ({ text: String(document.text), row: document.row as Row })));
-  const documentContext = datasetDocs.length > 0 ? (await queryUnstructuredDocuments(lastQuestion, 5)).join("\n") : "";
+  const documentContext = unstructuredDocs.join("\n");
   const rowContext = retrieved.map(document => document.text).join("\n");
   const context = [catalogContext, rowContext, documentContext ? `DOCUMENT CONTEXT:\n${documentContext}` : ""].filter(Boolean).join("\n\n");
   const system = `You are the Semantic Layer business and finance assistant. Answer in clear normal language, not SQL, JSON, or code. Use only the supplied governed catalog and retrieved dataset context for claims about uploaded data. Never invent figures, entities, dates, formulas, or financial conclusions. If the context is insufficient, say exactly what is missing and ask one concise clarification question. Explain business or finance terms whenever the user asks what a term means. For calculations, show the assumptions and say when a result is an estimate. Treat generated definitions as pending review and mention that limitation for material decisions. General conversation is allowed, but business/data answers must stay grounded.\n\nGOVERNED CONTEXT:\n${context || "No dataset has been uploaded yet."}`;

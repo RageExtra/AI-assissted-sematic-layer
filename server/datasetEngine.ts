@@ -1,3 +1,6 @@
+import { generateAndExecuteMql } from "./mqlEngine.js";
+import { generateEmbedding, cosineSimilarity } from "./_core/vector.js";
+import { insertKnowledgeGraphEdges, searchKnowledgeGraph } from "./knowledgeGraph.js";
 import { invokeLLM } from "./_core/llm";
 import { getDb, createCollection, createDefinition } from "./db";
 import { queryUnstructuredDocuments } from "./semanticEngine";
@@ -271,7 +274,7 @@ ${context || "No dataset has been uploaded yet."}`;
       { role: "system", content: system },
       ...messages.filter(message => message.role !== "system"),
     ],
-    maxTokens: 1024,
+    
   });
   const content = response.choices[0]?.message.content;
   return typeof content === "string" ? content : "I could not produce a grounded answer. Please rephrase the question.";

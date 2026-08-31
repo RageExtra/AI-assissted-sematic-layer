@@ -475,6 +475,11 @@ export async function listLLMModels(): Promise<ModelsResponse> {
   return (await response.json()) as ModelsResponse;
 }
 
+
+function stripThinkBlocks(text: string): string {
+  return text.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
+}
+
 export async function* streamLLM(params: InvokeParams): AsyncGenerator<string, void, unknown> {
   assertApiKey();
   const payload: Record<string, unknown> = {
@@ -504,10 +509,13 @@ export async function* streamLLM(params: InvokeParams): AsyncGenerator<string, v
 
   if (!response.body) throw new Error("No response body");
 
-  // Type assertion for node-fetch/undici stream compatibility in Node environment
   const stream = response.body as unknown as AsyncIterable<Uint8Array>;
   const decoder = new TextDecoder();
   let buffer = "";
+
+  // Strip <think>...</think> reasoning blocks emitted by models like DeepSeek-R1
+  let insideThinkBlock = false;
+  let thinkTailBuffer = "";
 
   for await (const chunk of stream) {
     buffer += decoder.decode(chunk, { stream: true });
@@ -519,9 +527,39 @@ export async function* streamLLM(params: InvokeParams): AsyncGenerator<string, v
       if (line.startsWith("data: ") && line !== "data: [DONE]") {
         try {
           const data = JSON.parse(line.slice(6));
-          if (data.choices?.[0]?.delta?.content) {
-            yield data.choices[0].delta.content;
+          const token: string = data.choices?.[0]?.delta?.content ?? "";
+          if (!token) continue;
+
+          thinkTailBuffer += token;
+          let output = "";
+          let i = 0;
+
+          while (i < thinkTailBuffer.length) {
+            if (!insideThinkBlock) {
+              const openIdx = thinkTailBuffer.indexOf("<think>", i);
+              if (openIdx === -1) {
+                output += thinkTailBuffer.slice(i);
+                i = thinkTailBuffer.length;
+              } else {
+                output += thinkTailBuffer.slice(i, openIdx);
+                insideThinkBlock = true;
+                i = openIdx + "<think>".length;
+              }
+            } else {
+              const closeIdx = thinkTailBuffer.indexOf("</think>", i);
+              if (closeIdx === -1) {
+                i = thinkTailBuffer.length;
+              } else {
+                insideThinkBlock = false;
+                i = closeIdx + "</think>".length;
+              }
+            }
           }
+
+          // Keep only a small tail in case a tag spans chunk boundaries
+          thinkTailBuffer = thinkTailBuffer.slice(Math.max(0, thinkTailBuffer.length - "</think>".length));
+
+          if (output) yield output;
         } catch (e) {
           // Ignore parse errors for partial lines
         }

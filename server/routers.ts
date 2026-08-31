@@ -27,10 +27,11 @@ export const appRouter = router({
         messages: z.array(z.object({
           role: z.enum(["system", "user", "assistant"]),
           content: z.string().trim().min(1).max(100_000)
-        })).min(1).max(24)
+        })).min(1).max(200),
+        otherChatsContext: z.string().optional()
       }))
       .mutation(async ({ input }) => {
-        const answer = await answerBusinessQuestion(input.messages);
+        const answer = await answerBusinessQuestion(input.messages, input.otherChatsContext);
         return { choices: [{ message: { role: "assistant" as const, content: answer } }] };
       })
   }),

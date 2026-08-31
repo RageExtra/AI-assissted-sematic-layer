@@ -209,10 +209,25 @@ export default function Chat() {
     reader.readAsDataURL(file);
   };
 
-  const handleSendMessage = (content: string) => {
+    const handleSendMessage = (content: string) => {
     const nextMessages = [...messages, { role: "user" as const, content }];
     setMessages(nextMessages);
-    chatMutation.mutate({ messages: nextMessages });
+    
+    // Create context from other chats
+    const otherChatsContext = sessions
+      .filter(s => s.id !== currentSessionId && s.messages.length > 1)
+      .map(s => {
+        const title = s.messages.find(m => m.role === "user")?.content || "Previous Chat";
+        const msgContent = s.messages.slice(-6).map(m => `${m.role.toUpperCase()}: ${m.content}`).join("\n");
+        return `--- Chat: ${title} ---\n${msgContent}`;
+      })
+      .slice(-5)
+      .join("\n\n");
+      
+    chatMutation.mutate({ 
+      messages: nextMessages,
+      otherChatsContext: otherChatsContext.length > 0 ? otherChatsContext : undefined
+    });
   };
 
   return (

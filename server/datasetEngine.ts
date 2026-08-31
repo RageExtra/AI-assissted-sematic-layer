@@ -242,7 +242,7 @@ async function findRelevantDatasetDocuments(question: string) {
   }
 }
 
-export async function answerBusinessQuestion(messages: Array<{ role: "user" | "assistant" | "system"; content: string }>) {
+export async function answerBusinessQuestion(messages: Array<{ role: "user" | "assistant" | "system"; content: string }>, otherChatsContext?: string) {
   const lastQuestion = [...messages].reverse().find(message => message.role === "user")?.content?.trim();
   if (!lastQuestion) throw new Error("A user question is required.");
     const quickReply = /^(hi|hello|hey|good morning|good afternoon|good evening|thanks|thank you|help|what can you do)[!.? ]*$/i.test(lastQuestion);
@@ -251,8 +251,7 @@ export async function answerBusinessQuestion(messages: Array<{ role: "user" | "a
   const db = await getDb();
   
   // Align RAG properly by including previous conversational context
-  const userMessages = messages.filter(m => m.role === "user").map(m => m.content);
-  const searchContext = userMessages.slice(-2).join(" ");
+  const searchContext = messages.map(m => m.content).slice(-4).join("\n");
   
   const [catalogContext, datasetDocs, unstructuredDocs] = await Promise.all([
     getCatalogContext(),
@@ -263,13 +262,16 @@ export async function answerBusinessQuestion(messages: Array<{ role: "user" | "a
   const documentContext = unstructuredDocs.join("\n");
   const rowContext = retrieved.map(document => document.text).join("\n");
   const context = [catalogContext, rowContext, documentContext ? `DOCUMENT CONTEXT:\n${documentContext}` : ""].filter(Boolean).join("\n\n");
-  const system = `You are the Semantic Layer business and finance assistant. Answer in clear normal language, not SQL, JSON, or code. Use only the supplied governed catalog and retrieved dataset context for claims about uploaded data. Never invent figures, entities, dates, formulas, or financial conclusions. If the context is insufficient, say exactly what is missing and ask one concise clarification question. Explain business or finance terms whenever the user asks what a term means. For calculations, show the assumptions and say when a result is an estimate. Treat generated definitions as pending review and mention that limitation for material decisions. General conversation is allowed, but business/data answers must stay grounded.\n\nGOVERNED CONTEXT:\n${context || "No dataset has been uploaded yet."}`;
+  const system = `You are the Semantic Layer business and finance assistant. Answer in clear normal language, not SQL, JSON, or code. Use only the supplied governed catalog and retrieved dataset context for claims about uploaded data. Never invent figures, entities, dates, formulas, or financial conclusions. If the context is insufficient, say exactly what is missing and ask one concise clarification question. Explain business or finance terms whenever the user asks what a term means. For calculations, show the assumptions and say when a result is an estimate. Treat generated definitions as pending review and mention that limitation for material decisions. General conversation is allowed, but business/data answers must stay grounded. When the user asks about or clarifies a specific entity (like a sale or customer), provide comprehensive details about it from the retrieved context instead of just confirming its existence.
+
+${otherChatsContext ? `PAST CHAT HISTORY CONTEXT (Use for reference if the user refers to past conversations):\n${otherChatsContext}\n\n` : "" }GOVERNED CONTEXT:
+${context || "No dataset has been uploaded yet."}`;
   const response = await invokeLLM({
     messages: [
       { role: "system", content: system },
-      ...messages.filter(message => message.role !== "system").slice(-6),
+      ...messages.filter(message => message.role !== "system"),
     ],
-    maxTokens: 600,
+    maxTokens: 1024,
   });
   const content = response.choices[0]?.message.content;
   return typeof content === "string" ? content : "I could not produce a grounded answer. Please rephrase the question.";

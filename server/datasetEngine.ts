@@ -347,9 +347,9 @@ export async function* streamBusinessQuestion(
   const lastQuestion = [...messages].reverse().find(message => message.role === "user")?.content?.trim();
   if (!lastQuestion) throw new Error("A user question is required.");
   
-  const quickReply = /^(hi|hello|hey|good morning|good afternoon|good evening|thanks|thank you|help|what can you do)[!.? ]*$/i.test(lastQuestion);
+  const quickReply = /^(hi+|hello+|hey+|good morning|good afternoon|good evening|thanks|thank you|help|what can you do)[!.? ]*$/i.test(lastQuestion);
   if (quickReply) {
-    yield lastQuestion.toLowerCase().startsWith("thank") ? "You're welcome. Upload a business or finance file whenever you're ready, and I'll help you explore or explain it." : "Hello. I can analyze uploaded business and finance data, explain terminology, and answer grounded questions in normal language. Upload a file or ask me anything to get started.";
+    yield lastQuestion.toLowerCase().startsWith("thank") ? "You're welcome. Upload a business or finance file whenever you're ready, and I'll help you explore or explain it." : "Hello! I can analyze uploaded business and finance data, explain terminology, and answer grounded questions in normal language. Upload a file or ask me anything to get started.";
     return;
   }
 
@@ -384,12 +384,18 @@ export async function* streamBusinessQuestion(
       signal,
     });
     
+    let chunkCount = 0;
     for await (const chunk of stream) {
+      chunkCount++;
       yield chunk;
+    }
+    
+    if (chunkCount === 0) {
+      yield "I could not produce a grounded answer based on the current context. Please try asking a specific question about your data.";
     }
   } catch (error) {
     if (signal?.aborted) return;
     console.warn("[DatasetEngine] LLM streaming error:", error);
-    yield "I encountered an issue streaming the grounded answer from the governed catalog. Please try again.";
+    yield `I encountered an issue streaming the grounded answer: ${error instanceof Error ? error.message : String(error)}. Please try again.`;
   }
 }

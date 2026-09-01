@@ -285,8 +285,8 @@ async function resolveChatModel(): Promise<string> {
     const payload = await response.json() as { data?: Array<{ id?: string }> };
     const models = (payload.data ?? []).map(item => item.id).filter((id): id is string => Boolean(id));
     const preferred = models.find(id => configured && id === configured)
-      ?? models.find(id => /gpt|claude|gemini|llama|mistral|qwen|deepseek/i.test(id) && !/embedding|moderation|whisper|tts|dall-e|image/i.test(id))
-      ?? models.find(id => !/embedding|moderation|whisper|tts|dall-e|image/i.test(id));
+      ?? models.find(id => /gpt|claude|gemini|llama|mistral|qwen|deepseek/i.test(id) && !/embedding|moderation|whisper|tts|dall-e|image|guard|safeguard/i.test(id))
+      ?? models.find(id => !/embedding|moderation|whisper|tts|dall-e|image|guard|safeguard/i.test(id));
     if (!preferred) throw new Error("provider returned no chat-capable models");
     discoveredModelCache = { model: preferred, expiresAt: Date.now() + 10 * 60 * 1000 };
     return preferred;

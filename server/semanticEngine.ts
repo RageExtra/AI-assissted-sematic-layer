@@ -673,12 +673,11 @@ export async function queryUnstructuredDocuments(query: string, limit = 3): Prom
   
   const queryEmbedding = await generateEmbedding(query);
   
-  let allDocs;
-  try {
-    allDocs = await db.collection("unstructured_docs").find({ $text: { $search: query } }, { projection: { documentName: 1, text: 1, embedding: 1 } }).sort({ score: { $meta: "textScore" } }).limit(Math.max(limit * 8, 24)).toArray();
-  } catch {
-    allDocs = await db.collection("unstructured_docs").find({}, { projection: { documentName: 1, text: 1, embedding: 1 } }).sort({ _id: -1 }).limit(160).toArray();
-  }
+  const allDocs = await db.collection("unstructured_docs")
+    .find({}, { projection: { documentName: 1, text: 1, embedding: 1 } })
+    .sort({ _id: -1 })
+    .limit(500)
+    .toArray();
   if (allDocs.length === 0) return [];
   
   const scoredDocs = allDocs.map(doc => {

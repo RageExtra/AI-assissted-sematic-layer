@@ -255,10 +255,20 @@ async function findRelevantDatasetDocuments(question: string) {
   const db = await getDb();
   if (!db) return [];
   try {
-    return await db.collection("datasetDocuments").find({ $text: { $search: question } }, { projection: { text: 1, row: 1 } }).sort({ score: { $meta: "textScore" } }).limit(40).toArray();
+    const results = await db.collection("datasetDocuments")
+      .find({ $text: { $search: question } }, { projection: { text: 1, row: 1 } })
+      .sort({ score: { $meta: "textScore" } })
+      .limit(40)
+      .toArray();
+    if (results.length > 0) return results;
   } catch {
-    return db.collection("datasetDocuments").find({}, { projection: { text: 1, row: 1 } }).sort({ createdAt: -1 }).limit(120).toArray();
+    // text index might be missing or still building
   }
+  return db.collection("datasetDocuments")
+    .find({}, { projection: { text: 1, row: 1 } })
+    .sort({ createdAt: -1 })
+    .limit(120)
+    .toArray();
 }
 
 function buildGroundingSystemPrompt(context: string): string {

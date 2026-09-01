@@ -58,9 +58,12 @@ async function startServer() {
   
   app.post("/api/chat/stream", async (req, res) => {
     const controller = new AbortController();
-    const abortHandler = () => controller.abort();
+    const abortHandler = () => {
+      if (req.socket.destroyed) {
+        controller.abort();
+      }
+    };
     req.on("close", abortHandler);
-    req.on("aborted", abortHandler);
 
     try {
       const { messages } = req.body;
@@ -92,7 +95,6 @@ async function startServer() {
       }
     } finally {
       req.off("close", abortHandler);
-      req.off("aborted", abortHandler);
     }
   });
 

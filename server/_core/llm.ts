@@ -346,6 +346,10 @@ const fetchWithBackoff = async (
       const retryAfterMs = parseRetryAfter(
         response.headers.get("retry-after")
       );
+      if (retryAfterMs && retryAfterMs > 10000) {
+        console.warn(`Rate limit retry-after is ${retryAfterMs}ms, capping to fail fast.`);
+        return response; // Fail fast so the user gets an error message instead of a proxy timeout
+      }
       try {
         await response.body?.cancel();
       } catch {

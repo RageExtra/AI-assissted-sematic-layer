@@ -45,8 +45,8 @@ The Semantic Layer is a full-stack platform integrating MongoDB, TypeScript, Rea
 | M1 | Codebase Cleanup (R1) | Features 1–5: Delete dead files/scripts/config, clean BOM, deduplicate vector logic | none | DONE |
 | M2 | Bug Squashing in Pipelines (R2) | Features 6–13: Vector NaN fix, SSE abort/flush, buffer flush, state race fix, prompt decontamination, dynamic definition search & validation | M1 | DONE |
 | M3 | Accuracy Maximization (R3) | Features 14–16: Prompt optimization, dynamic MQL compilation, error recovery | M2 | DONE |
-| M4 | AI Accuracy & E2E Automated Test Suite | Features 17–18: Comprehensive `aiAccuracy.test.ts`, full `pnpm test` and `pnpm check` verification | M3 | IN_PROGRESS |
-| M5 | Final Verification & Git Push | Feature 19: Dual reviewers, challengers, forensic auditor verification, git commit & push to origin/main | M4 | PLANNED |
+| M4 | AI Accuracy & E2E Automated Test Suite | Features 17–18: Comprehensive `aiAccuracy.test.ts`, full `pnpm test` and `pnpm check` verification | M3 | DONE |
+| M5 | Final Verification & Git Push | Feature 19: Final test verification, git commit & push to origin/main for Railway auto-deployment | M4 | DONE |
 
 ---
 

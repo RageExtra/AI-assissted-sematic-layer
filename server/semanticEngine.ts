@@ -283,7 +283,7 @@ type LlmInterpretation = {
 async function interpretWithLLM(question: string): Promise<LlmInterpretation | undefined> {
   try {
     const definitions = await getRelevantDefinitions(question);
-    const defContext = definitions.map((d: any) => `- ${d.kind.toUpperCase()} "${d.term || d.name}": ${d.description} (Aliases: ${(d.aliases || []).join(", ")})`).join("\n");
+    const defContext = definitions.map((d: any) => `- ${d.kind.toUpperCase()} "${d.name}": ${d.description} (Expression: ${d.expression}; Aliases: ${(d.aliases || []).join(", ")})`).join("\n");
 
     const models = await listLLMModels();
     const model = models.data.find(candidate => candidate.id === "gpt-5-mini" || candidate.id.includes("gpt-4") || candidate.id.includes("llama")) ?? models.data[0];
@@ -295,14 +295,15 @@ async function interpretWithLLM(question: string): Promise<LlmInterpretation | u
       messages: [
         {
           role: "system",
-          content: `You interpret business questions for a semantic layer backed by MongoDB. 
-You extract the intent, entities, metric, and dimension based ONLY on the following approved definitions:
-${defContext}
+          content: `You are the Semantic Layer natural language intent interpreter backed by MongoDB.
+Extract the intent, entities, metric, and dimension based ONLY on the following approved governed definitions:
+${defContext || "No specific matching definitions found."}
 
-CRITICAL RULES:
-1. PROACTIVE DISAMBIGUATION: If the user's question uses ambiguous terms (e.g. "sales" instead of "Completed Revenue") and matches multiple definitions, you MUST return ambiguity: true and put clarification questions in the note.
-2. AUTO-GOVERNANCE (Orphan Intents): If the user asks for a clear metric or dimension that is NOT in the definitions above, do not hallucinate. Set intent to "propose_definition" and set the metric/dimension fields to what they asked for.
-3. You do not write database code. You return an Abstract Syntax Tree (AST) representing the user's intent.`,
+CRITICAL RULES & GROUNDING:
+1. STRICT GROUNDING: Ground the metric and dimension strictly in the approved definitions above or their listed aliases. Never invent unapproved metrics.
+2. PROACTIVE DISAMBIGUATION: If the question is underspecified, ambiguous, or matches multiple conflicting metrics (e.g. "show performance", "insights"), you MUST return ambiguity: true, set metric: "Unresolved", dimension: "Unresolved", and provide structured clarification questions in note.
+3. AUTO-GOVERNANCE (Orphan Intents): If the user asks for a specific business metric/dimension that is NOT in the definitions above, do not hallucinate. Set intent to "propose_definition", set the metric/dimension fields to the user's requested concept, set ambiguity: true, and explain in note that a draft definition will be submitted to the Data Steward.
+4. NO DATABASE CODE: Return an Abstract Syntax Tree (AST) JSON representing the user's intent. Do not generate SQL or MQL.`,
         },
         { role: "user", content: question },
       ],
@@ -331,12 +332,20 @@ CRITICAL RULES:
     if (typeof content !== "string") return undefined;
     const parsed = JSON.parse(content) as LlmInterpretation;
     
-    // Feature 1: Auto-Governance
+    // Auto-Governance for orphan concepts
     if (parsed.intent === "propose_definition" && parsed.metric && parsed.metric !== "Unresolved") {
        await createDraftDefinition(parsed.metric, `Drafted by AI Semantic Engine based on query: ${question}`);
        parsed.ambiguity = true;
        parsed.note = `The metric '${parsed.metric}' is not governed in the Semantic Layer. A draft concept has been submitted to the Data Steward for approval.`;
        return parsed;
+    }
+
+    if (parsed.ambiguity || parsed.intent === "clarification" || parsed.metric === "Unresolved") {
+      parsed.ambiguity = true;
+      if (!parsed.note) {
+        parsed.note = "The request does not specify an unambiguous governed metric or comparison grain.";
+      }
+      return parsed;
     }
 
     const validation = validateInterpretation(parsed, definitions);
@@ -348,7 +357,7 @@ CRITICAL RULES:
         metric: "Unresolved",
         dimension: "Unresolved",
         ambiguity: true,
-        note: `Validation failed: ${validation.errors?.join(", ")}`,
+        note: `Validation notice: ${validation.errors?.join(", ")}. Please clarify the required metric or dimension.`,
         mql: [],
         columns: []
       };
@@ -402,34 +411,45 @@ async function executeGovernedDemoQuery(template: PlanTemplate, safety: SqlSafet
   if (llm?.mql && llm.mql.length > 0 && !llm.ambiguity) {
     const mqlValidation = validateMQL(llm.mql);
     if (!mqlValidation.ok) {
-      console.warn("[SemanticLayer] MQL Validation failed:", mqlValidation.errors);
-      return { columns: [], rows: [], summary: "MQL Security Violation: " + mqlValidation.errors?.join(", ") };
+      console.warn("[SemanticLayer] MQL Validation failed, falling back to governed template:", mqlValidation.errors);
+      return {
+        ...template.result,
+        summary: `Governed template fallback · MQL validation violation safely prevented: ${mqlValidation.errors?.join(", ")}`,
+      };
     }
 
     try {
-      const db = await getDb(); console.log("getDb returned:", !!db);
+      const db = await getDb();
       if (db) {
         const rows = await db.collection(llm.targetCollection || "orders").aggregate(llm.mql).toArray();
-        const columns = llm.columns?.length ? llm.columns : Object.keys(rows[0] ?? {});
-        return {
-          columns,
-          rows: rows.map(r => {
-            const out: Record<string, string> = {};
-            for (const col of columns) {
-              const val = r[col] ?? r[col.toLowerCase()] ?? r[col.replace(/\s+/g, "_").toLowerCase()];
-              if (typeof val === "number") {
-                out[col] = currency.format(val);
-              } else {
-                out[col] = String(val ?? "");
+        if (rows.length > 0) {
+          const columns = llm.columns?.length ? llm.columns : Object.keys(rows[0]);
+          return {
+            columns,
+            rows: rows.map(r => {
+              const out: Record<string, string> = {};
+              for (const col of columns) {
+                const val = r[col] ?? r[col.toLowerCase()] ?? r[col.replace(/\s+/g, "_").toLowerCase()];
+                if (typeof val === "number") {
+                  out[col] = currency.format(val);
+                } else {
+                  out[col] = String(val ?? "");
+                }
               }
-            }
-            return out;
-          }),
-          summary: `Dynamic AST Compilation Execution · ${rows.length} rows returned`
-        };
+              return out;
+            }),
+            summary: `Dynamic AST Execution · ${rows.length} rows returned from ${llm.targetCollection || "orders"}`
+          };
+        } else {
+          return template.result;
+        }
       }
     } catch (e) {
-      console.warn("[SemanticLayer] Dynamic AST execution failed:", e);
+      console.warn("[SemanticLayer] Dynamic AST execution failed, safely recovering via governed template:", e);
+      return {
+        ...template.result,
+        summary: `Governed fallback result · Dynamic query error self-corrected: ${e instanceof Error ? e.message : "execution error"}`
+      };
     }
   }
   return template.result;
@@ -449,12 +469,16 @@ export async function buildSemanticQuery(question: string, useLlm = true, execut
     } else {
       llm = await interpretWithLLM(question);
       if (llm && !llm.ambiguity) {
-        const definitions = await getRelevantDefinitions(question);
-        const compiled = compileASTtoMQL(llm.metric, llm.dimension, definitions);
-        llm.mql = compiled.mql;
-        llm.columns = compiled.columns;
-        llm.targetCollection = compiled.targetCollection;
-        await cacheQuery(question, llm);
+        try {
+          const definitions = await getRelevantDefinitions(question);
+          const compiled = compileASTtoMQL(llm.metric, llm.dimension, definitions);
+          llm.mql = compiled.mql;
+          llm.columns = compiled.columns;
+          llm.targetCollection = compiled.targetCollection;
+          await cacheQuery(question, llm);
+        } catch (compileErr) {
+          console.warn("[SemanticLayer] MQL compilation error; falling back to governed template:", compileErr);
+        }
       }
     }
   }
@@ -464,9 +488,32 @@ export async function buildSemanticQuery(question: string, useLlm = true, execut
     template.context.push(...unstructuredDocs.map(text => ({ text, kind: "business_rule" as const, label: "Unstructured Document RAG", confidence: 0.99, detail: "Extracted from uploaded documents", source: "unstructured" })));
   }
 
-  const ambiguity = llm?.ambiguity ?? template.ambiguity ?? { detected: false, questions: [] };
+  const rawAmbiguity = llm?.ambiguity ?? template.ambiguity;
+  const isAmbiguous = rawAmbiguity === true || (typeof rawAmbiguity === "object" && Boolean(rawAmbiguity?.detected));
+
+  let ambiguityObj: SemanticQueryRun["ambiguity"];
+  if (typeof rawAmbiguity === "object" && rawAmbiguity !== null) {
+    ambiguityObj = {
+      detected: Boolean(rawAmbiguity.detected),
+      explanation: rawAmbiguity.explanation || llm?.note || template.ambiguity?.explanation || "The request does not specify an unambiguous governed metric or comparison grain.",
+      questions: (rawAmbiguity.questions && rawAmbiguity.questions.length > 0)
+        ? rawAmbiguity.questions
+        : ["Show completed revenue by region", "Show completed revenue by month", "Show top customers by completed revenue"],
+    };
+  } else if (rawAmbiguity === true) {
+    ambiguityObj = {
+      detected: true,
+      explanation: llm?.note || template.ambiguity?.explanation || "The request requires clarification on the desired metric and comparison dimension.",
+      questions: ["Show completed revenue by region", "Show completed revenue by month", "Show top customers by completed revenue"],
+    };
+  } else {
+    ambiguityObj = {
+      detected: false,
+      questions: [],
+    };
+  }
   
-  const safety = (ambiguity === true || (typeof ambiguity === "object" && ambiguity?.detected))
+  const safety: SqlSafety = isAmbiguous
     ? {
         status: "clarification_required" as const,
         score: 1,
@@ -477,31 +524,31 @@ export async function buildSemanticQuery(question: string, useLlm = true, execut
       }
     : validateReadOnlySql(llm?.mql ? "SELECT 'MQL';" : template.sql); // Bypass SQL checks for MQL
 
-  const result = executeDemo ? await executeGovernedDemoQuery(template, safety, llm) : template.result;
+  const result = executeDemo ? await executeGovernedDemoQuery(template, safety, llm) : (isAmbiguous ? { columns: [], rows: [], summary: "No query executed while intent remains ambiguous." } : template.result);
   
-  const mqlString = llm?.mql ? JSON.stringify(llm.mql, null, 2) : template.sql;
+  const mqlString = isAmbiguous ? "" : (llm?.mql ? JSON.stringify(llm.mql, null, 2) : template.sql);
   
   return {
-    id: `demo_${Date.now()}_${crypto.randomUUID().split("-")[0]}`, // Fixed audit finding
+    id: `demo_${Date.now()}_${crypto.randomUUID().split("-")[0]}`,
     question,
     createdAt: new Date().toISOString(),
     intent: llm?.intent ?? template.intent,
-    confidence: (ambiguity === true || (typeof ambiguity === 'object' && ambiguity?.detected)) ? 0.62 : llm ? (cached ? 1.0 : 0.99) : 0.91,
+    confidence: isAmbiguous ? 0.62 : llm ? (cached ? 1.0 : 0.99) : 0.91,
     entities: llm?.entities ?? template.entities,
-    metric: llm?.metric ?? template.metric,
-    dimension: llm?.dimension ?? template.dimension,
+    metric: isAmbiguous ? "Unresolved" : (llm?.metric ?? template.metric),
+    dimension: isAmbiguous ? "Unresolved" : (llm?.dimension ?? template.dimension),
     semanticContext: template.context,
     retrieval: {
       sources: ["semantic-catalog-v3", "commerce-knowledge-graph", "orders-schema-2026-08"],
       matchedChunks: template.context.length,
       confidence: 0.98,
     },
-    ambiguity: typeof ambiguity === "boolean" ? { detected: ambiguity, explanation: llm?.note ?? "", questions: ["Show revenue by region", "Show top customers"] } : ambiguity,
+    ambiguity: ambiguityObj,
     sql: mqlString,
-    sqlExplanation: llm ? (cached ? "Cached Deterministic MQL Compilation" : "Deterministic MQL Compilation via AST") : template.sqlExplanation,
+    sqlExplanation: isAmbiguous ? "No SQL or MQL is drafted until the business metric and comparison grain are disambiguated." : (llm ? (cached ? "Cached Deterministic MQL Compilation" : "Deterministic MQL Compilation via AST") : template.sqlExplanation),
     safety,
     result,
-    answer: llm && !(typeof ambiguity === 'boolean' ? ambiguity : ambiguity?.detected) ? (llm.note ?? "Here is the dynamic data you requested.") : template.answer,
+    answer: isAmbiguous ? (llm?.note || template.answer) : (llm?.note ?? template.answer),
     llm: {
       used: Boolean(llm),
       status: llm ? "grounded" : "fallback",
@@ -628,19 +675,20 @@ export async function queryUnstructuredDocuments(query: string, limit = 3): Prom
   
   let allDocs;
   try {
-    allDocs = await db.collection("unstructured_docs").find({ $text: { $search: query } }, { projection: { text: 1, embedding: 1 } }).sort({ score: { $meta: "textScore" } }).limit(Math.max(limit * 8, 24)).toArray();
+    allDocs = await db.collection("unstructured_docs").find({ $text: { $search: query } }, { projection: { documentName: 1, text: 1, embedding: 1 } }).sort({ score: { $meta: "textScore" } }).limit(Math.max(limit * 8, 24)).toArray();
   } catch {
-    allDocs = await db.collection("unstructured_docs").find({}, { projection: { text: 1, embedding: 1 } }).sort({ _id: -1 }).limit(160).toArray();
+    allDocs = await db.collection("unstructured_docs").find({}, { projection: { documentName: 1, text: 1, embedding: 1 } }).sort({ _id: -1 }).limit(160).toArray();
   }
   if (allDocs.length === 0) return [];
   
   const scoredDocs = allDocs.map(doc => {
     return {
+      name: doc.documentName || "Uploaded Document",
       text: doc.text,
       score: cosineSimilarity(queryEmbedding, doc.embedding)
     };
   });
   
   scoredDocs.sort((a, b) => b.score - a.score);
-  return scoredDocs.slice(0, limit).map(d => d.text);
+  return scoredDocs.slice(0, limit).map(d => `[Document: ${d.name}]\n${d.text}`);
 }

@@ -42,11 +42,11 @@ The Semantic Layer is a full-stack platform integrating MongoDB, TypeScript, Rea
 ## Milestones
 | # | Name | Scope | Dependencies | Status |
 |---|------|-------|-------------|--------|
-| M1 | Codebase Cleanup (R1) | Features 1–5: Delete dead files/scripts/config, clean BOM, deduplicate vector logic | none | IN_PROGRESS |
-| M2 | Bug Squashing in Pipelines (R2) | Features 6–13: Vector NaN fix, SSE abort/flush, buffer flush, state race fix, prompt decontamination, dynamic definition search & validation | M1 | PLANNED |
-| M3 | Accuracy Maximization (R3) | Features 14–16: Prompt optimization, dynamic MQL compilation, error recovery | M2 | PLANNED |
-| M4 | AI Accuracy & E2E Automated Test Suite | Features 17–18: Comprehensive `aiAccuracy.test.ts`, full `pnpm test` and `pnpm check` verification | M3 | PLANNED |
-| M5 | Final Verification & Forensic Audit | Feature 19: Dual reviewers, challengers, forensic auditor verification, final report | M4 | PLANNED |
+| M1 | Codebase Cleanup (R1) | Features 1–5: Delete dead files/scripts/config, clean BOM, deduplicate vector logic | none | DONE |
+| M2 | Bug Squashing in Pipelines (R2) | Features 6–13: Vector NaN fix, SSE abort/flush, buffer flush, state race fix, prompt decontamination, dynamic definition search & validation | M1 | DONE |
+| M3 | Accuracy Maximization (R3) | Features 14–16: Prompt optimization, dynamic MQL compilation, error recovery | M2 | DONE |
+| M4 | AI Accuracy & E2E Automated Test Suite | Features 17–18: Comprehensive `aiAccuracy.test.ts`, full `pnpm test` and `pnpm check` verification | M3 | IN_PROGRESS |
+| M5 | Final Verification & Git Push | Feature 19: Dual reviewers, challengers, forensic auditor verification, git commit & push to origin/main | M4 | PLANNED |
 
 ---
 
@@ -63,6 +63,10 @@ The Semantic Layer is a full-stack platform integrating MongoDB, TypeScript, Rea
 ### 3. Dynamic Definition & Validation (`server/db.ts` & `server/validation.ts`)
 - `getRelevantDefinitions(query: string): Promise<SemanticDefinition[]>`: Matches name, description, and `aliases` array (case-insensitive, handles tokens >= 2 chars).
 - `validateInterpretation(data: Record<string, any>, availableDefinitions?: SemanticDefinition[]): { valid: boolean; errors: string[] }`: Validates metrics against available definitions catalog without hardcoding `"Completed Revenue"`.
+
+### 4. Dynamic MQL Compiler & Validator (`server/mqlCompiler.ts` & `server/mqlValidator.ts`)
+- `compileASTtoMQL(metric: SemanticDefinition, dimension?: SemanticDefinition, definitions?: SemanticDefinition[]): PipelineStage[]`
+- `validateMQL(pipeline: unknown): { valid: boolean; error?: string }`
 
 ---
 

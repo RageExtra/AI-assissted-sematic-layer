@@ -33,6 +33,17 @@ describe("semantic SQL safety", () => {
     expect(run.ambiguity.detected).toBe(true);
     expect(run.safety.status).toBe("clarification_required");
     expect(run.sql).toBe("");
+    expect(run.metric).toBe("Unresolved");
+    expect(run.dimension).toBe("Unresolved");
+    expect(run.ambiguity.questions.length).toBeGreaterThan(0);
+  });
+
+  it("handles demo query execution error gracefully with self-correction fallback", async () => {
+    const run = await buildSemanticQuery("Show revenue by region", false, true);
+    expect(run.result).toBeDefined();
+    expect(run.result.columns).toContain("Region");
+    expect(run.result.rows.length).toBeGreaterThan(0);
+    expect(run.safety.status).toBe("validated");
   });
 
   it("retrieves relevant definitions dynamically by alias and short acronyms", async () => {

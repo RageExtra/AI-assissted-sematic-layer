@@ -70,7 +70,7 @@ function readableField(field: string) {
 }
 
 function rowText(datasetName: string, row: Row) {
-  return `${datasetName} dataset row: ${Object.entries(row).map(([key, value]) => `${readableField(key)}: ${String(value ?? "")}`).join(" | ")}`;
+  return `[Dataset: ${datasetName}] ${Object.entries(row).map(([key, value]) => `${readableField(key)}: ${String(value ?? "")}`).join(" | ")}`;
 }
 
 function tokenize(text: string) {
@@ -219,15 +219,34 @@ export async function getDatasetJob(jobId: string): Promise<DatasetJob | null> {
 }
 
 let catalogCache: { value: string; expiresAt: number } | null = null;
-
-async function getCatalogContext() {
+async function getCatalogContext() {
   if (catalogCache && catalogCache.expiresAt > Date.now()) return catalogCache.value;
   const db = await getDb();
   if (!db) return "";
   const datasets = await db.collection("uploadedDatasets").find({ status: "ready" }).sort({ createdAt: -1 }).limit(20).toArray();
   const definitions = await db.collection("semanticDefinitions").find({ status: { $in: ["approved", "pending_review"] } }).sort({ updatedAt: -1 }).limit(120).toArray();
-  const datasetSummaries = datasets.map(dataset => `DATASET SUMMARY: ${dataset.name}; complete_rows=${dataset.rowCount};\\n${String(dataset.summary ?? "No persisted summary is available.")}`);
-  const value = [...datasets.map(dataset => `DATASET: ${dataset.name}; rows=${dataset.rowCount}; fields=${JSON.stringify(dataset.schema)}`), ...datasetSummaries, definitions.map(definition => `${definition.kind.toUpperCase()}: ${definition.name} — ${definition.description}; expression=${definition.expression}; aliases=${(definition.aliases ?? []).join(", ")}`).join("\\n")].filter(Boolean).join("\\n\\n");
+
+  const sections: string[] = [];
+
+  if (datasets.length > 0) {
+    const datasetEntries = datasets.map(dataset => {
+      const schemaStr = Object.entries(dataset.schema || {})
+        .map(([field, prof]: [string, any]) => `  - ${field}: ${prof.type}${prof.nullable ? " (nullable)" : ""}`)
+        .join("\n");
+      return `[Dataset: ${dataset.name}]\n- Rows: ${dataset.rowCount}\n- Fields: ${dataset.fieldCount}\n- Schema:\n${schemaStr}\n- Data Profile Summary:\n${String(dataset.summary ?? "No persisted summary available.")}`;
+    });
+    sections.push(`### UPLOADED BUSINESS DATASETS & SCHEMAS\n${datasetEntries.join("\n\n")}`);
+  }
+
+  if (definitions.length > 0) {
+    const defEntries = definitions.map(def => {
+      const kindLabel = def.kind ? def.kind.charAt(0).toUpperCase() + def.kind.slice(1) : "Definition";
+      return `[Governed ${kindLabel}: ${def.name}]\n- Description: ${def.description}\n- Expression: ${def.expression}\n- Status: ${def.status}\n- Aliases: ${(def.aliases ?? []).join(", ")}`;
+    });
+    sections.push(`### GOVERNED SEMANTIC DEFINITIONS CATALOG\n${defEntries.join("\n\n")}`);
+  }
+
+  const value = sections.join("\n\n");
   catalogCache = { value, expiresAt: Date.now() + 30_000 };
   return value;
 }
@@ -240,6 +259,25 @@ async function findRelevantDatasetDocuments(question: string) {
   } catch {
     return db.collection("datasetDocuments").find({}, { projection: { text: 1, row: 1 } }).sort({ createdAt: -1 }).limit(120).toArray();
   }
+}
+
+function buildGroundingSystemPrompt(context: string): string {
+  return `You are the Semantic Layer business and finance intelligence assistant.
+Answer in clear, natural human language. Do not output raw JSON, AST structures, or internal database code.
+
+MANDATORY GROUNDING & CITATION RULES:
+1. STRICT GROUNDING: Ground all statements, metrics, numbers, dates, formulas, and conclusions strictly in the provided Governed Context. NEVER invent figures, assumptions, entities, dates, or financial conclusions.
+2. MANDATORY CITATIONS: You MUST cite the source for every fact, figure, and definition using standardized citation tags:
+   - For tabular datasets and schemas: [Dataset: <dataset_name>]
+   - For unstructured documents and extracts: [Document: <document_name>]
+   - For governed semantic definitions: [Governed Metric: <name>], [Governed Dimension: <name>], or [Governed Entity: <name>]
+3. REFUSE HALLUCINATION & STATE GAPS: If the context does not contain sufficient data to answer the user's question, state clearly and concisely what specific information is missing. Ask one focused clarifying question rather than guessing or extrapolating.
+4. EXPLICIT CALCULATIONS: For calculations, show the explicit formula and numbers used from the retrieved context. If an estimate or projection is requested, explain the underlying assumptions.
+5. GOVERNANCE STATUS: Treat definitions marked "pending_review" as draft concepts and mention that limitation for material decisions.
+6. COMPREHENSIVE CONTEXT: When the user asks about or clarifies a specific entity (like a customer, sale, or policy), provide thorough, comprehensive details from the retrieved context.
+
+GOVERNED CONTEXT:
+${context || "No dataset or semantic definitions have been uploaded yet."}`;
 }
 
 export async function answerBusinessQuestion(
@@ -263,29 +301,33 @@ export async function answerBusinessQuestion(
     db ? queryUnstructuredDocuments(searchContext, 5) : Promise.resolve([]),
   ]);
   const retrieved = retrieveRows(searchContext, datasetDocs.map(document => ({ text: String(document.text), row: document.row as Row })));
-  const documentContext = unstructuredDocs.join("\n");
+  const documentContext = unstructuredDocs.join("\n\n");
   const rowContext = retrieved.map(document => document.text).join("\n");
   
-  const context = [
-    catalogContext, 
-    rowContext, 
-    documentContext ? `DOCUMENT CONTEXT:\n${documentContext}` : "",
-  ].filter(Boolean).join("\n\n");
-  const system = `You are the Semantic Layer business and finance assistant. Answer in clear normal language, not SQL, JSON, or code. Use only the supplied governed catalog and retrieved dataset context for claims about uploaded data. Never invent figures, entities, dates, formulas, or financial conclusions. If the context is insufficient, say exactly what is missing and ask one concise clarification question. Explain business or finance terms whenever the user asks what a term means. For calculations, show the assumptions and say when a result is an estimate. Treat generated definitions as pending review and mention that limitation for material decisions. General conversation is allowed, but business/data answers must stay grounded. When the user asks about or clarifies a specific entity (like a sale or customer), provide comprehensive details about it from the retrieved context instead of just confirming its existence.
+  const contextParts: string[] = [];
+  if (catalogContext) contextParts.push(catalogContext);
+  if (rowContext) contextParts.push(`### RETRIEVED TABULAR ROW SAMPLES\n${rowContext}`);
+  if (documentContext) contextParts.push(`### RETRIEVED UNSTRUCTURED DOCUMENT KNOWLEDGE\n${documentContext}`);
 
-GOVERNED CONTEXT:
-${context || "No dataset has been uploaded yet."}`;
-  const response = await invokeLLM({
-    messages: [
-      { role: "system", content: system },
-      ...messages.filter(message => message.role !== "system"),
-    ],
-    signal,
-  });
-  const content = response.choices[0]?.message.content;
-  return typeof content === "string" ? content : "I could not produce a grounded answer. Please rephrase the question.";
+  const context = contextParts.join("\n\n");
+  const system = buildGroundingSystemPrompt(context);
+
+  try {
+    const response = await invokeLLM({
+      messages: [
+        { role: "system", content: system },
+        ...messages.filter(message => message.role !== "system"),
+      ],
+      signal,
+    });
+    const content = response.choices[0]?.message.content;
+    return typeof content === "string" ? content : "I could not produce a grounded answer. Please rephrase the question.";
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    console.warn("[DatasetEngine] LLM invocation error; providing grounded fallback response.", error);
+    return "I encountered an issue processing your question against the governed catalog. Please ensure relevant datasets or definitions are loaded, or try rephrasing.";
+  }
 }
-
 
 export async function* streamBusinessQuestion(
   messages: Array<{ role: "user" | "assistant" | "system"; content: string }>,
@@ -312,29 +354,32 @@ export async function* streamBusinessQuestion(
   ]);
   
   const retrieved = retrieveRows(searchContext, datasetDocs.map(document => ({ text: String(document.text), row: document.row as any })));
-  const documentContext = unstructuredDocs.join("\n");
+  const documentContext = unstructuredDocs.join("\n\n");
   const rowContext = retrieved.map(document => document.text).join("\n");
   
-  const context = [
-    catalogContext, 
-    rowContext, 
-    documentContext ? `DOCUMENT CONTEXT:\n${documentContext}` : "",
-  ].filter(Boolean).join("\n\n");
-  
-  const system = `You are the Semantic Layer business and finance assistant. Answer in clear normal language, not SQL, JSON, or code. Use only the supplied governed catalog and retrieved dataset context for claims about uploaded data. Never invent figures, entities, dates, formulas, or financial conclusions. If the context is insufficient, say exactly what is missing and ask one concise clarification question. Explain business or finance terms whenever the user asks what a term means. For calculations, show the assumptions and say when a result is an estimate. Treat generated definitions as pending review and mention that limitation for material decisions. General conversation is allowed, but business/data answers must stay grounded. When the user asks about or clarifies a specific entity (like a sale or customer), provide comprehensive details about it from the retrieved context instead of just confirming its existence.
+  const contextParts: string[] = [];
+  if (catalogContext) contextParts.push(catalogContext);
+  if (rowContext) contextParts.push(`### RETRIEVED TABULAR ROW SAMPLES\n${rowContext}`);
+  if (documentContext) contextParts.push(`### RETRIEVED UNSTRUCTURED DOCUMENT KNOWLEDGE\n${documentContext}`);
 
-GOVERNED CONTEXT:
-${context || "No dataset has been uploaded yet."}`;
+  const context = contextParts.join("\n\n");
+  const system = buildGroundingSystemPrompt(context);
 
-  const stream = streamLLM({
-    messages: [
-      { role: "system", content: system },
-      ...messages.filter(message => message.role !== "system"),
-    ],
-    signal,
-  });
-  
-  for await (const chunk of stream) {
-    yield chunk;
+  try {
+    const stream = streamLLM({
+      messages: [
+        { role: "system", content: system },
+        ...messages.filter(message => message.role !== "system"),
+      ],
+      signal,
+    });
+    
+    for await (const chunk of stream) {
+      yield chunk;
+    }
+  } catch (error) {
+    if (signal?.aborted) return;
+    console.warn("[DatasetEngine] LLM streaming error:", error);
+    yield "I encountered an issue streaming the grounded answer from the governed catalog. Please try again.";
   }
 }

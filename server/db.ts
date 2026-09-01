@@ -11,7 +11,7 @@ let _db: Db | null = null;
 export async function getMongoClient() {
   if (!_client && process.env.MONGODB_URI) {
     try {
-      _client = new MongoClient(process.env.MONGODB_URI);
+      _client = new MongoClient(process.env.MONGODB_URI, { serverSelectionTimeoutMS: 3000 });
       await _client.connect();
       _db = _client.db(); // Uses the default DB in connection string
     } catch (error) {

@@ -30,7 +30,9 @@ export function validateMQL(pipeline: unknown): { ok: boolean; errors?: string[]
     }
     if (stageName === "$lookup" && stageValue && typeof stageValue === "object" && !Array.isArray(stageValue)) {
       const from = (stageValue as Record<string, unknown>).from;
-      if (typeof from !== "string" || !ALLOWED_LOOKUP_COLLECTIONS.has(from)) errors.push("$lookup collection is not approved.");
+      if (typeof from !== "string" || (!ALLOWED_LOOKUP_COLLECTIONS.has(from) && !from.startsWith("dataset_"))) {
+        errors.push("$lookup collection is not approved.");
+      }
       if (Object.keys(stageValue as object).some(key => !["from", "localField", "foreignField", "as"].includes(key))) errors.push("$lookup may only use simple equality joins.");
     }
     const serialized = JSON.stringify(stage);

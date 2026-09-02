@@ -282,8 +282,21 @@ export function AIChatBox({
                           <ReactMarkdown 
                             remarkPlugins={[remarkGfm, remarkMath]}
                             rehypePlugins={[rehypeKatex]}
+                            components={{
+                              a: ({ node, href, children, ...props }) => {
+                                if (href && href.startsWith("citation://")) {
+                                  return (
+                                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 mx-1 rounded-md bg-primary/10 text-primary text-[11px] font-medium border border-primary/20 align-middle">
+                                      <Sparkles className="size-3" />
+                                      {children}
+                                    </span>
+                                  );
+                                }
+                                return <a href={href} target="_blank" rel="noreferrer" className="text-primary underline" {...props}>{children}</a>;
+                              }
+                            }}
                           >
-                            {message.content}
+                            {message.content.replace(/\[(Dataset|Document|Governed Metric):\s*([^\]]+)\]/g, '[$1: $2](citation://$1)')}
                           </ReactMarkdown>
                         </div>
                       ) : (

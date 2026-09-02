@@ -74,7 +74,7 @@ async function startServer() {
       res.setHeader("Connection", "keep-alive");
       res.setHeader("X-Accel-Buffering", "no");
       res.flushHeaders();
-      res.write(":\\n\\n"); // send empty SSE comment to flush headers through proxies
+      res.write(":\n\n"); // send empty SSE comment to flush headers through proxies
       
       const { streamBusinessQuestion } = await import("../datasetEngine.js");
       const stream = streamBusinessQuestion(messages, undefined, controller.signal);

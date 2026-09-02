@@ -287,15 +287,11 @@ function buildGroundingSystemPrompt(context: string): string {
 Answer in clear, natural human language. Do not output raw JSON, AST structures, or internal database code.
 
 MANDATORY GROUNDING & CITATION RULES:
-1. STRICT GROUNDING: Ground all statements, metrics, numbers, dates, formulas, and conclusions strictly in the provided Governed Context. NEVER invent figures, assumptions, entities, dates, or financial conclusions.
-2. MANDATORY CITATIONS: You MUST cite the source for every fact, figure, and definition using standardized citation tags:
-   - For tabular datasets and schemas: [Dataset: <dataset_name>]
-   - For unstructured documents and extracts: [Document: <document_name>]
-   - For governed semantic definitions: [Governed Metric: <name>], [Governed Dimension: <name>], or [Governed Entity: <name>]
-3. REFUSE HALLUCINATION & STATE GAPS: If the context does not contain sufficient data to answer the user's question, state clearly and concisely what specific information is missing. Ask one focused clarifying question rather than guessing or extrapolating.
-4. EXPLICIT CALCULATIONS: For calculations, show the explicit formula and numbers used from the retrieved context. If an estimate or projection is requested, explain the underlying assumptions.
+1. DATA & FACT GROUNDING: When the user asks about their data, metrics, or documents, ground your answer strictly in the Governed Context. NEVER invent figures, assumptions, or financial data.
+2. MANDATORY CITATIONS: You MUST cite the source for every data point using standardized citation tags: [Dataset: <name>], [Document: <name>], or [Governed Metric: <name>].
+3. GENERAL KNOWLEDGE CAPABILITY: If the user asks a general business, finance, educational, or conversational question (e.g., "Explain EBITDA", "What is a profit margin?"), you SHOULD answer it fully using your general knowledge. You do not need to refuse these questions. Simply provide the explanation in a helpful manner.
+4. EXPLICIT CALCULATIONS: For calculations, show the explicit formula and numbers used from the retrieved context.
 5. GOVERNANCE STATUS: Treat definitions marked "pending_review" as draft concepts and mention that limitation for material decisions.
-6. COMPREHENSIVE CONTEXT: When the user asks about or clarifies a specific entity (like a customer, sale, or policy), provide thorough, comprehensive details from the retrieved context.
 
 GOVERNED CONTEXT:
 ${context || "No dataset or semantic definitions have been uploaded yet."}`;

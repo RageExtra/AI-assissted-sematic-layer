@@ -111,7 +111,7 @@ function retrieveRows(question: string, documents: Array<{ text: string; row: Ro
   return documents.slice(0, MAX_CONTEXT_ROWS);
 }
 
-async function processDatasetUpload(name: string, inputRows: unknown[]): Promise<DatasetUploadResult> {
+async function processDatasetUpload(name: string, inputRows: unknown[], sessionId?: string): Promise<DatasetUploadResult> {
   if (!Array.isArray(inputRows) || inputRows.length === 0) throw new Error("The dataset must contain at least one row.");
   if (inputRows.length > MAX_ROWS) throw new Error(`The dataset is limited to ${MAX_ROWS.toLocaleString()} rows per upload.`);
   const rows = inputRows.filter(isPlainRecord).map(row => {
@@ -147,6 +147,7 @@ async function processDatasetUpload(name: string, inputRows: unknown[]): Promise
     summary: summarizeRows(rows),
     status: "ready",
     createdAt: new Date().toISOString(),
+    sessionId,
   });
 
   let definitionsCreated = 0;
@@ -185,6 +186,7 @@ async function processDatasetUpload(name: string, inputRows: unknown[]): Promise
     text: rowText(datasetName, row),
     row,
     createdAt: new Date().toISOString(),
+    sessionId,
   })));
   await db.collection("datasetDocuments").createIndex({ text: "text" }, { name: "dataset_document_text_search" });
 
@@ -193,17 +195,17 @@ async function processDatasetUpload(name: string, inputRows: unknown[]): Promise
 
 export type DatasetJob = { jobId: string; status: "queued" | "processing" | "ready" | "failed"; result?: DatasetUploadResult; error?: string };
 
-export async function queueDatasetIngestion(name: string, inputRows: unknown[]): Promise<DatasetJob> {
+export async function queueDatasetIngestion(name: string, inputRows: unknown[], sessionId?: string): Promise<DatasetJob> {
   if (!Array.isArray(inputRows) || inputRows.length === 0) throw new Error("The dataset must contain at least one row.");
   if (inputRows.length > MAX_ROWS) throw new Error(`The dataset is limited to ${MAX_ROWS.toLocaleString()} rows per upload.`);
   const db = await getDb();
   if (!db) throw new Error("Database unavailable");
   const jobId = crypto.randomUUID();
-  await db.collection("datasetJobs").insertOne({ jobId, name: name.trim().slice(0, 160), status: "queued", createdAt: new Date().toISOString() });
+  await db.collection("datasetJobs").insertOne({ jobId, name: name.trim().slice(0, 160), status: "queued", createdAt: new Date().toISOString(), sessionId });
   setImmediate(async () => {
     try {
       await db.collection("datasetJobs").updateOne({ jobId }, { $set: { status: "processing", startedAt: new Date().toISOString() } });
-      const result = await processDatasetUpload(name, inputRows);
+      const result = await processDatasetUpload(name, inputRows, sessionId);
       await db.collection("datasetJobs").updateOne({ jobId }, { $set: { status: "ready", result, completedAt: new Date().toISOString() } });
     } catch (error) {
       await db.collection("datasetJobs").updateOne({ jobId }, { $set: { status: "failed", error: error instanceof Error ? error.message : "Dataset processing failed", completedAt: new Date().toISOString() } });
@@ -223,11 +225,11 @@ export async function getDatasetJob(jobId: string): Promise<DatasetJob | null> {
 }
 
 let catalogCache: { value: string; expiresAt: number } | null = null;
-async function getCatalogContext() {
-  if (catalogCache && catalogCache.expiresAt > Date.now()) return catalogCache.value;
+async function getCatalogContext(sessionId?: string) {
   const db = await getDb();
   if (!db) return "";
-  const datasets = await db.collection("uploadedDatasets").find({ status: "ready" }).sort({ createdAt: -1 }).limit(3).toArray();
+  const query = sessionId ? { status: "ready", sessionId } : { status: "ready" };
+  const datasets = await db.collection("uploadedDatasets").find(query).sort({ createdAt: -1 }).limit(3).toArray();
   const definitions = await db.collection("semanticDefinitions").find({ status: { $in: ["approved", "pending_review"] } }).sort({ updatedAt: -1 }).limit(15).toArray();
 
   const sections: string[] = [];
@@ -262,12 +264,13 @@ let catalogCache: { value: string; expiresAt: number } | null = null;
   return value;
 }
 
-async function findRelevantDatasetDocuments(question: string) {
+async function findRelevantDatasetDocuments(question: string, sessionId?: string) {
   const db = await getDb();
   if (!db) return [];
   try {
+    const query = sessionId ? { $text: { $search: question }, sessionId } : { $text: { $search: question } };
     const results = await db.collection("datasetDocuments")
-      .find({ $text: { $search: question } }, { projection: { text: 1, row: 1 } })
+      .find(query, { projection: { text: 1, row: 1 } })
       .sort({ score: { $meta: "textScore" } })
       .limit(40)
       .toArray();
@@ -311,7 +314,7 @@ async function requiresDatabaseContext(question: string): Promise<boolean> {
 
 export async function answerBusinessQuestion(
   messages: Array<{ role: "user" | "assistant" | "system"; content: string }>,
-  _unusedContext?: string,
+  sessionId?: string,
   signal?: AbortSignal
 ) {
   const lastQuestion = [...messages].reverse().find(message => message.role === "user")?.content?.trim();
@@ -330,9 +333,9 @@ export async function answerBusinessQuestion(
   
   if (needsContext) {
     [catalogContext, datasetDocs, unstructuredDocs] = await Promise.all([
-      getCatalogContext(),
-      db ? findRelevantDatasetDocuments(searchContext) : Promise.resolve([]),
-      db ? queryUnstructuredDocuments(searchContext, 5) : Promise.resolve([]),
+      getCatalogContext(sessionId),
+      db ? findRelevantDatasetDocuments(searchContext, sessionId) : Promise.resolve([]),
+      db ? queryUnstructuredDocuments(searchContext, 5, sessionId) : Promise.resolve([]),
     ]);
   }
   
@@ -370,7 +373,7 @@ export async function answerBusinessQuestion(
 
 export async function* streamBusinessQuestion(
   messages: Array<{ role: "user" | "assistant" | "system"; content: string }>,
-  _unusedContext?: string,
+  sessionId?: string,
   signal?: AbortSignal
 ): AsyncGenerator<string, void, unknown> {
   const lastQuestion = [...messages].reverse().find(message => message.role === "user")?.content?.trim();
@@ -393,9 +396,9 @@ export async function* streamBusinessQuestion(
   
   if (needsContext) {
     [catalogContext, datasetDocs, unstructuredDocs] = await Promise.all([
-      getCatalogContext(),
-      db ? findRelevantDatasetDocuments(searchContext) : Promise.resolve([]),
-      db ? queryUnstructuredDocuments(searchContext, 5) : Promise.resolve([]),
+      getCatalogContext(sessionId),
+      db ? findRelevantDatasetDocuments(searchContext, sessionId) : Promise.resolve([]),
+      db ? queryUnstructuredDocuments(searchContext, 5, sessionId) : Promise.resolve([]),
     ]);
   }
   

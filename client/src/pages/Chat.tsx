@@ -159,7 +159,7 @@ export default function Chat() {
     appendMessage({ role: "assistant", content: `I've successfully processed your dataset! It contains **${result.rowCount.toLocaleString()} rows** of data.\n\nI can see fields like ${fields}${result.fieldCount > 6 ? ", and more" : ""}. You can now ask me to analyze this data or ask specific questions like "What are the key trends?"` });
   }, [datasetJobId, datasetJobQuery.data, handledJobId]);
 
-  const processFile = async (file: File): Promise<void> => {
+  const processFile = async (file: File, sessionId: string): Promise<void> => {
     return new Promise((resolve, reject) => {
       if (file.size > 25 * 1024 * 1024) return reject(new Error("Files are limited to 25 MB."));
       const lowerName = file.name.toLowerCase();
@@ -171,7 +171,7 @@ export default function Chat() {
             const raw = String(reader.result ?? "");
             const data = lowerName.endsWith(".json") ? JSON.parse(raw) : parseDelimited(raw, lowerName.endsWith(".tsv") ? "\t" : ",");
             if (!Array.isArray(data)) throw new Error("JSON must contain an array of row objects.");
-            await uploadMutation.mutateAsync({ name: file.name, data });
+            await uploadMutation.mutateAsync({ name: file.name, data, sessionId });
             resolve();
           } catch (error) {
             reject(error instanceof Error ? error : new Error("Could not parse the file."));
@@ -184,7 +184,7 @@ export default function Chat() {
           try {
             const result = String(reader.result ?? "");
             const base64Data = result.includes(",") ? result.split(",", 2)[1] : result;
-            await uploadDocumentMutation.mutateAsync({ name: file.name, fileType: file.type || "application/octet-stream", base64Data });
+            await uploadDocumentMutation.mutateAsync({ name: file.name, fileType: file.type || "application/octet-stream", base64Data, sessionId });
             resolve();
           } catch(e) {
             reject(e instanceof Error ? e : new Error("Could not upload document."));
@@ -219,7 +219,7 @@ export default function Chat() {
 
     if (stagedFile) {
       try {
-        await processFile(stagedFile);
+        await processFile(stagedFile, targetSessionId);
       } catch (e) {
         toast.error(e instanceof Error ? e.message : "File upload failed");
         return; // stop if upload fails
@@ -233,7 +233,8 @@ export default function Chat() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
-          messages: nextMessages
+          messages: nextMessages,
+          sessionId: targetSessionId
         })
       });
       

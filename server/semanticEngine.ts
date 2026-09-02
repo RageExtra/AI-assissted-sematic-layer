@@ -595,7 +595,7 @@ export function startCachePreWarming() {
   prewarmTimer.unref?.();
 }
 
-export async function handleDocumentUpload(name: string, fileType: string, base64Data: string) {
+export async function handleDocumentUpload(name: string, fileType: string, base64Data: string, sessionId?: string) {
   try {
     const db = await getDb();
     if (!db) throw new Error("Database unavailable");
@@ -650,7 +650,8 @@ export async function handleDocumentUpload(name: string, fileType: string, base6
       documentDocs.push({
         documentName: name,
         text: chunk,
-        embedding
+        embedding,
+        sessionId
       });
     }
     
@@ -667,14 +668,15 @@ export async function handleDocumentUpload(name: string, fileType: string, base6
   }
 }
 
-export async function queryUnstructuredDocuments(query: string, limit = 3): Promise<string[]> {
+export async function queryUnstructuredDocuments(query: string, limit = 3, sessionId?: string): Promise<string[]> {
   const db = await getDb();
   if (!db) return [];
   
   const queryEmbedding = await generateEmbedding(query);
   
+  const dbQuery = sessionId ? { sessionId } : {};
   const allDocs = await db.collection("unstructured_docs")
-    .find({}, { projection: { documentName: 1, text: 1, embedding: 1 } })
+    .find(dbQuery, { projection: { documentName: 1, text: 1, embedding: 1 } })
     .sort({ _id: -1 })
     .limit(500)
     .toArray();

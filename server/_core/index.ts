@@ -66,7 +66,7 @@ async function startServer() {
     req.on("close", abortHandler);
 
     try {
-      const { messages } = req.body;
+      const { messages, sessionId } = req.body;
       if (!messages || !Array.isArray(messages)) return res.status(400).json({ error: "Invalid messages" });
       
       res.setHeader("Content-Type", "text/event-stream");
@@ -77,7 +77,7 @@ async function startServer() {
       res.write(":\n\n"); // send empty SSE comment to flush headers through proxies
       
       const { streamBusinessQuestion } = await import("../datasetEngine.js");
-      const stream = streamBusinessQuestion(messages, undefined, controller.signal);
+      const stream = streamBusinessQuestion(messages, sessionId, controller.signal);
       
       for await (const chunk of stream) {
         if (controller.signal.aborted) break;

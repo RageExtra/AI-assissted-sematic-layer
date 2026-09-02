@@ -70,18 +70,18 @@ export const appRouter = router({
         return { success: true } as const;
       }),
     uploadDataset: publicProcedure
-      .input(z.object({ name: z.string().trim().min(1).max(160), data: z.array(z.unknown()).min(1).max(10_000) }))
-      .mutation(async ({ input }) => queueDatasetIngestion(input.name, input.data)),
+      .input(z.object({ name: z.string().trim().min(1).max(160), data: z.array(z.unknown()).min(1).max(10_000), sessionId: z.string().optional() }))
+      .mutation(async ({ input }) => queueDatasetIngestion(input.name, input.data, input.sessionId)),
     datasetJob: publicProcedure
       .input(z.object({ jobId: z.string().uuid() }))
       .query(({ input }) => getDatasetJob(input.jobId)),
     uploadDocument: publicProcedure
-      .input(z.object({ name: z.string().trim().min(1).max(240), fileType: z.string().trim().max(160), base64Data: z.string().min(1).max(28_000_000) }))
+      .input(z.object({ name: z.string().trim().min(1).max(240), fileType: z.string().trim().max(160), base64Data: z.string().min(1).max(28_000_000), sessionId: z.string().optional() }))
       .mutation(async ({ input }) => {
         try {
           console.log("[TRPC] Starting document upload:", input.name, input.fileType, "size:", input.base64Data.length);
           const { handleDocumentUpload } = await import("./semanticEngine");
-          const result = await handleDocumentUpload(input.name, input.fileType, input.base64Data);
+          const result = await handleDocumentUpload(input.name, input.fileType, input.base64Data, input.sessionId);
           console.log("[TRPC] Document upload success:", result);
           return result;
         } catch (err) {

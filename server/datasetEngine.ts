@@ -234,10 +234,15 @@ let catalogCache: { value: string; expiresAt: number } | null = null;
 
   if (datasets.length > 0) {
     const datasetEntries = datasets.map(dataset => {
-      const schemaStr = Object.entries(dataset.schema || {})
+      const schemaEntries = Object.entries(dataset.schema || {});
+      const schemaStr = schemaEntries.slice(0, 40)
         .map(([field, prof]: [string, any]) => `  - ${field}: ${prof.type}${prof.nullable ? " (nullable)" : ""}`)
-        .join("\n");
-      return `[Dataset: ${dataset.name}]\n- Rows: ${dataset.rowCount}\n- Fields: ${dataset.fieldCount}\n- Schema:\n${schemaStr}\n- Data Profile Summary:\n${String(dataset.summary ?? "No persisted summary available.")}`;
+        .join("\n") + (schemaEntries.length > 40 ? "\n  - ... (schema truncated)" : "");
+      
+      const summaryString = String(dataset.summary ?? "No persisted summary available.");
+      const truncatedSummary = summaryString.length > 1500 ? summaryString.slice(0, 1500) + "...\n(Summary truncated)" : summaryString;
+      
+      return `[Dataset: ${dataset.name}]\n- Rows: ${dataset.rowCount}\n- Fields: ${dataset.fieldCount}\n- Schema:\n${schemaStr}\n- Data Profile Summary:\n${truncatedSummary}`;
     });
     sections.push(`### UPLOADED BUSINESS DATASETS & SCHEMAS\n${datasetEntries.join("\n\n")}`);
   }
@@ -245,7 +250,9 @@ let catalogCache: { value: string; expiresAt: number } | null = null;
   if (definitions.length > 0) {
     const defEntries = definitions.map(def => {
       const kindLabel = def.kind ? def.kind.charAt(0).toUpperCase() + def.kind.slice(1) : "Definition";
-      return `[Governed ${kindLabel}: ${def.name}]\n- Description: ${def.description}\n- Expression: ${def.expression}\n- Status: ${def.status}\n- Aliases: ${(def.aliases ?? []).join(", ")}`;
+      const desc = def.description && def.description.length > 150 ? def.description.slice(0, 150) + "..." : (def.description || "N/A");
+      const expr = def.expression && def.expression.length > 150 ? def.expression.slice(0, 150) + "..." : (def.expression || "N/A");
+      return `[Governed ${kindLabel}: ${def.name}]\n- Description: ${desc}\n- Expression: ${expr}\n- Status: ${def.status}`;
     });
     sections.push(`### GOVERNED SEMANTIC DEFINITIONS CATALOG\n${defEntries.join("\n\n")}`);
   }
@@ -316,7 +323,10 @@ export async function answerBusinessQuestion(
   ]);
   const retrieved = retrieveRows(searchContext, datasetDocs.map(document => ({ text: String(document.text), row: document.row as Row })));
   const documentContext = unstructuredDocs.join("\n\n");
-  const rowContext = retrieved.map(document => document.text).join("\n");
+  const rowContext = retrieved.map(document => {
+    const text = String(document.text);
+    return text.length > 500 ? text.slice(0, 500) + "..." : text;
+  }).join("\n");
   
   const contextParts: string[] = [];
   if (catalogContext) contextParts.push(catalogContext);
@@ -369,7 +379,10 @@ export async function* streamBusinessQuestion(
   
   const retrieved = retrieveRows(searchContext, datasetDocs.map(document => ({ text: String(document.text), row: document.row as any })));
   const documentContext = unstructuredDocs.join("\n\n");
-  const rowContext = retrieved.map(document => document.text).join("\n");
+  const rowContext = retrieved.map(document => {
+    const text = String(document.text);
+    return text.length > 500 ? text.slice(0, 500) + "..." : text;
+  }).join("\n");
   
   const contextParts: string[] = [];
   if (catalogContext) contextParts.push(catalogContext);

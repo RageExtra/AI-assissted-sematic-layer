@@ -4,7 +4,7 @@ import { queryUnstructuredDocuments } from "./semanticEngine.js";
 
 const MAX_ROWS = 10_000;
 const MAX_FIELDS = 120;
-const MAX_CONTEXT_ROWS = 20;
+const MAX_CONTEXT_ROWS = 5;
 
 export type DatasetUploadResult = {
   success: true;
@@ -88,7 +88,7 @@ function summarizeRows(rows: Row[]) {
     }
     const counts = new Map<string, number>();
     for (const value of values) counts.set(String(value), (counts.get(String(value)) ?? 0) + 1);
-    const topValues = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]).slice(0, 12).map(([value, count]) => `${value} (${count})`);
+    const topValues = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([value, count]) => `${value} (${count})`);
     return `${readableField(field)}: categorical values=${topValues.join(", ")}`;
   }).join("\\n");
 }
@@ -227,8 +227,8 @@ let catalogCache: { value: string; expiresAt: number } | null = null;
   if (catalogCache && catalogCache.expiresAt > Date.now()) return catalogCache.value;
   const db = await getDb();
   if (!db) return "";
-  const datasets = await db.collection("uploadedDatasets").find({ status: "ready" }).sort({ createdAt: -1 }).limit(20).toArray();
-  const definitions = await db.collection("semanticDefinitions").find({ status: { $in: ["approved", "pending_review"] } }).sort({ updatedAt: -1 }).limit(120).toArray();
+  const datasets = await db.collection("uploadedDatasets").find({ status: "ready" }).sort({ createdAt: -1 }).limit(3).toArray();
+  const definitions = await db.collection("semanticDefinitions").find({ status: { $in: ["approved", "pending_review"] } }).sort({ updatedAt: -1 }).limit(15).toArray();
 
   const sections: string[] = [];
 

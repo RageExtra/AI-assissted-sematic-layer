@@ -336,7 +336,7 @@ export async function answerBusinessQuestion(
     const response = await invokeLLM({
       messages: [
         { role: "system", content: system },
-        ...messages.filter(message => message.role !== "system"),
+        ...messages.filter(message => message.role !== "system").slice(-10),
       ],
       signal,
     });
@@ -392,7 +392,7 @@ export async function* streamBusinessQuestion(
     const stream = streamLLM({
       messages: [
         { role: "system", content: system },
-        ...messages.filter(message => message.role !== "system"),
+        ...messages.filter(message => message.role !== "system").slice(-10),
       ],
       signal,
     });

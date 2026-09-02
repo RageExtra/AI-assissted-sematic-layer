@@ -131,7 +131,7 @@ export default function Chat() {
     onSuccess: data => {
       setDatasetJobId(data.jobId);
       setHandledJobId(null);
-      toast.success("Dataset upload received; background indexing started.");
+      toast.success("Dataset uploaded successfully! Processing data...");
       
     },
     onError: error => toast.error(error.message || "Dataset upload failed."),
@@ -139,7 +139,7 @@ export default function Chat() {
 
   const uploadDocumentMutation = trpc.semantic.uploadDocument.useMutation({
     onSuccess: data => {
-      toast.success(`Document indexed: ${data.chunksGenerated} chunks`);
+      toast.success("Document processed successfully!");
       
     },
     onError: error => toast.error(error.message || "Document upload failed."),
@@ -150,13 +150,13 @@ export default function Chat() {
     if (!job || !datasetJobId || job.status === "queued" || job.status === "processing" || handledJobId === datasetJobId) return;
     setHandledJobId(datasetJobId);
     if (job.status === "failed") {
-      appendMessage({ role: "assistant", content: `Dataset indexing failed: ${job.error ?? "Unknown processing error"}` });
+      appendMessage({ role: "assistant", content: `There was an issue processing your dataset: ${job.error ?? "Unknown error"}` });
       return;
     }
     const result = job.result;
     if (!result) return;
     const fields = Object.keys(result.schema).slice(0, 6).join(", ");
-    appendMessage({ role: "assistant", content: `Your dataset is ready. I indexed **${result.rowCount.toLocaleString()} rows** across **${result.fieldCount} fields** and generated **${result.definitionsCreated} semantic definitions** for review.\n\nDetected fields include: ${fields}${result.fieldCount > 6 ? ", and more" : ""}. You can now ask questions such as “What was total revenue by region?” or “Explain EBITDA.”` });
+    appendMessage({ role: "assistant", content: `I've successfully processed your dataset! It contains **${result.rowCount.toLocaleString()} rows** of data.\n\nI can see fields like ${fields}${result.fieldCount > 6 ? ", and more" : ""}. You can now ask me to analyze this data or ask specific questions like "What are the key trends?"` });
   }, [datasetJobId, datasetJobQuery.data, handledJobId]);
 
   const processFile = async (file: File): Promise<void> => {

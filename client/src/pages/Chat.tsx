@@ -1,6 +1,6 @@
 import { AIChatBox, type Message } from "@/components/AIChatBox";
 import { trpc } from "@/lib/trpc";
-import { Network, History, Plus, Trash2, Clock, ChevronRight, MessageSquare , Menu} from "lucide-react";
+import { Network, Plus, Trash2, Clock, ChevronRight, MessageSquare , Menu} from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { useEffect, useState, type ChangeEvent } from "react";
@@ -372,11 +372,7 @@ export default function Chat() {
           ))}
         </div>
         
-        <div className="p-4 border-t border-[#dfe3df] bg-[#f5f4ef]/50">
-           <a href="/admin" className="flex items-center gap-2 text-sm font-semibold text-[#68767e] transition-colors hover:text-[#112235]">
-             <History className="size-4" /> Background workspace &rarr;
-           </a>
-        </div>
+
       </div>
       
       {/* Main Chat Area */}

@@ -318,7 +318,7 @@ export async function answerBusinessQuestion(
   if (!lastQuestion) throw new Error("A user question is required.");
 
   const quickReply = /^(hi+|hello+|hey+|good morning|good afternoon|good evening|thanks|thank you|help|what can you do)[!.? ]*$/i.test(lastQuestion);
-  if (quickReply) return lastQuestion.toLowerCase().startsWith("thank") ? "You're welcome. Upload a business or finance file whenever you're ready, and I'll help you explore or explain it." : "Hello! I can analyze uploaded business and finance data, explain terminology, and answer grounded questions in normal language. Upload a file or ask me anything to get started.";
+  if (quickReply) return lastQuestion.toLowerCase().startsWith("thank") ? "You're welcome. Upload a business or finance file whenever you're ready, and I'll help you explore or explain it." : "Hello. I can analyze uploaded business and finance data, explain terminology, and answer grounded questions in normal language. Upload a file or ask me anything to get started.";
 
   const needsContext = await requiresDatabaseContext(lastQuestion);
   const db = await getDb();
@@ -378,7 +378,7 @@ export async function* streamBusinessQuestion(
   
   const quickReply = /^(hi+|hello+|hey+|good morning|good afternoon|good evening|thanks|thank you|help|what can you do)[!.? ]*$/i.test(lastQuestion);
   if (quickReply) {
-    yield lastQuestion.toLowerCase().startsWith("thank") ? "You're welcome. Upload a business or finance file whenever you're ready, and I'll help you explore or explain it." : "Hello! I can analyze uploaded business and finance data, explain terminology, and answer grounded questions in normal language. Upload a file or ask me anything to get started.";
+    yield lastQuestion.toLowerCase().startsWith("thank") ? "You're welcome. Upload a business or finance file whenever you're ready, and I'll help you explore or explain it." : "Hello. I can analyze uploaded business and finance data, explain terminology, and answer grounded questions in normal language. Upload a file or ask me anything to get started.";
     return;
   }
 

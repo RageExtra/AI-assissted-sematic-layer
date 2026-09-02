@@ -95,16 +95,20 @@ function summarizeRows(rows: Row[]) {
 
 function retrieveRows(question: string, documents: Array<{ text: string; row: Row }>) {
   const questionTokens = tokenize(question);
-  return documents
-    .map(document => {
-      const rowTokens = tokenize(document.text);
-      let score = 0;
-      questionTokens.forEach(token => { if (rowTokens.has(token)) score += 1; });
-      return { ...document, score };
-    })
-    .filter(document => document.score > 0)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, MAX_CONTEXT_ROWS);
+  const scored = documents.map(document => {
+    const rowTokens = tokenize(document.text);
+    let score = 0;
+    questionTokens.forEach(token => { if (rowTokens.has(token)) score += 1; });
+    return { ...document, score };
+  });
+  
+  const filtered = scored.filter(document => document.score > 0);
+  if (filtered.length > 0) {
+    return filtered.sort((a, b) => b.score - a.score).slice(0, MAX_CONTEXT_ROWS);
+  }
+  
+  // Fallback: if no rows match the query exactly, return a sample
+  return documents.slice(0, MAX_CONTEXT_ROWS);
 }
 
 async function processDatasetUpload(name: string, inputRows: unknown[]): Promise<DatasetUploadResult> {

@@ -297,6 +297,18 @@ GOVERNED CONTEXT:
 ${context || "No dataset or semantic definitions have been uploaded yet."}`;
 }
 
+async function requiresDatabaseContext(question: string): Promise<boolean> {
+  try {
+    const response = await invokeLLM({
+      messages: [{ role: "user", content: `Answer ONLY "YES" or "NO". Does this question require analyzing an uploaded business dataset, spreadsheet, database, or company document?\nQuestion: "${question}"` }],
+    });
+    const content = response.choices[0]?.message.content;
+    return typeof content === "string" ? content.trim().toUpperCase().includes("YES") : true;
+  } catch {
+    return true;
+  }
+}
+
 export async function answerBusinessQuestion(
   messages: Array<{ role: "user" | "assistant" | "system"; content: string }>,
   _unusedContext?: string,
@@ -304,19 +316,26 @@ export async function answerBusinessQuestion(
 ) {
   const lastQuestion = [...messages].reverse().find(message => message.role === "user")?.content?.trim();
   if (!lastQuestion) throw new Error("A user question is required.");
-  const quickReply = /^(hi|hello|hey|good morning|good afternoon|good evening|thanks|thank you|help|what can you do)[!.? ]*$/i.test(lastQuestion);
-  if (quickReply) return lastQuestion.toLowerCase().startsWith("thank") ? "You're welcome. Upload a business or finance file whenever you’re ready, and I'll help you explore or explain it." : "Hello. I can analyze uploaded business and finance data, explain terminology, and answer grounded questions in normal language. Upload a file or ask me anything to get started.";
 
+  const quickReply = /^(hi+|hello+|hey+|good morning|good afternoon|good evening|thanks|thank you|help|what can you do)[!.? ]*$/i.test(lastQuestion);
+  if (quickReply) return lastQuestion.toLowerCase().startsWith("thank") ? "You're welcome. Upload a business or finance file whenever you're ready, and I'll help you explore or explain it." : "Hello! I can analyze uploaded business and finance data, explain terminology, and answer grounded questions in normal language. Upload a file or ask me anything to get started.";
+
+  const needsContext = await requiresDatabaseContext(lastQuestion);
   const db = await getDb();
-  
-  // Align RAG properly by including previous conversational context
   const searchContext = messages.map(m => m.content).slice(-4).join("\n");
   
-  const [catalogContext, datasetDocs, unstructuredDocs] = await Promise.all([
-    getCatalogContext(),
-    db ? findRelevantDatasetDocuments(searchContext) : Promise.resolve([]),
-    db ? queryUnstructuredDocuments(searchContext, 5) : Promise.resolve([]),
-  ]);
+  let catalogContext = "";
+  let datasetDocs: any[] = [];
+  let unstructuredDocs: string[] = [];
+  
+  if (needsContext) {
+    [catalogContext, datasetDocs, unstructuredDocs] = await Promise.all([
+      getCatalogContext(),
+      db ? findRelevantDatasetDocuments(searchContext) : Promise.resolve([]),
+      db ? queryUnstructuredDocuments(searchContext, 5) : Promise.resolve([]),
+    ]);
+  }
+  
   const retrieved = retrieveRows(searchContext, datasetDocs.map(document => ({ text: String(document.text), row: document.row as Row })));
   const documentContext = unstructuredDocs.join("\n\n");
   const rowContext = retrieved.map(document => {
@@ -363,15 +382,22 @@ export async function* streamBusinessQuestion(
     return;
   }
 
+  const needsContext = await requiresDatabaseContext(lastQuestion);
   const db = await getDb();
   
   const searchContext = messages.map(m => m.content).slice(-4).join("\n");
   
-  const [catalogContext, datasetDocs, unstructuredDocs] = await Promise.all([
-    getCatalogContext(),
-    db ? findRelevantDatasetDocuments(searchContext) : Promise.resolve([]),
-    db ? queryUnstructuredDocuments(searchContext, 5) : Promise.resolve([]),
-  ]);
+  let catalogContext = "";
+  let datasetDocs: any[] = [];
+  let unstructuredDocs: string[] = [];
+  
+  if (needsContext) {
+    [catalogContext, datasetDocs, unstructuredDocs] = await Promise.all([
+      getCatalogContext(),
+      db ? findRelevantDatasetDocuments(searchContext) : Promise.resolve([]),
+      db ? queryUnstructuredDocuments(searchContext, 5) : Promise.resolve([]),
+    ]);
+  }
   
   const retrieved = retrieveRows(searchContext, datasetDocs.map(document => ({ text: String(document.text), row: document.row as any })));
   const documentContext = unstructuredDocs.join("\n\n");

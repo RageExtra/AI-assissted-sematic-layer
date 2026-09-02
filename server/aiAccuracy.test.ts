@@ -364,7 +364,7 @@ describe("Milestone M4: AI Accuracy & Pipeline Reliability Benchmark Suite", () 
       for await (const chunk of streamGen) {
         chunks.push(chunk);
       }
-      expect(chunks.join("")).toContain("Hello. I can analyze uploaded business and finance data");
+      expect(chunks.join("")).toContain("Hello! I can analyze uploaded business and finance data");
     });
   });
 

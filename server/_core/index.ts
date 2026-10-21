@@ -13,6 +13,7 @@ import * as db from "../db";
 import { executeBenchmarkSchedule } from "../automation";
 import { runSeed } from "../seedDemo";
 import { startCachePreWarming } from "../semanticEngine";
+import { initNeo4jKnowledgeGraph } from "../graphEngine";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -35,6 +36,7 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 
 async function startServer() {
   await runSeed();
+  await initNeo4jKnowledgeGraph();
   startCachePreWarming();
   const app = express();
   const server = createServer(app);

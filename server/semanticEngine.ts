@@ -7,6 +7,7 @@ import { validateInterpretation } from "./validation";
 import { getCachedQuery, cacheQuery } from "./cache";
 import { validateMQL } from "./mqlValidator";
 import { compileASTtoMQL } from "./mqlCompiler";
+import { getGraphContextForQuery } from "./graphEngine";
 
 type PlanTemplate = {
   id: "region" | "customers" | "trend" | "clarify";
@@ -282,8 +283,14 @@ type LlmInterpretation = {
 
 async function interpretWithLLM(question: string): Promise<LlmInterpretation | undefined> {
   try {
-    const definitions = await getRelevantDefinitions(question);
+    const [definitions, graphContext] = await Promise.all([
+      getRelevantDefinitions(question),
+      getGraphContextForQuery(question),
+    ]);
     const defContext = definitions.map((d: any) => `- ${d.kind.toUpperCase()} "${d.name}": ${d.description} (Expression: ${d.expression}; Aliases: ${(d.aliases || []).join(", ")})`).join("\n");
+    const graphSection = graphContext.relationships.length > 0
+      ? `\nKNOWLEDGE GRAPH RELATIONSHIPS (Neo4j):\n${graphContext.relationships.map(r => `• ${r}`).join("\n")}`
+      : "";
 
     const models = await listLLMModels();
     const model = models.data.find(candidate => candidate.id === "gpt-5-mini" || candidate.id.includes("gpt-4") || candidate.id.includes("llama")) ?? models.data[0];
@@ -295,9 +302,10 @@ async function interpretWithLLM(question: string): Promise<LlmInterpretation | u
       messages: [
         {
           role: "system",
-          content: `You are the Semantic Layer natural language intent interpreter backed by MongoDB.
-Extract the intent, entities, metric, and dimension based ONLY on the following approved governed definitions:
+          content: `You are the Semantic Layer natural language intent interpreter backed by MongoDB and Neo4j Knowledge Graph.
+Extract the intent, entities, metric, and dimension based ONLY on the following approved governed definitions and Knowledge Graph relationships:
 ${defContext || "No specific matching definitions found."}
+${graphSection}
 
 CRITICAL RULES & GROUNDING:
 1. STRICT GROUNDING: Ground the metric and dimension strictly in the approved definitions above or their listed aliases. Never invent unapproved metrics.
@@ -483,9 +491,17 @@ export async function buildSemanticQuery(question: string, useLlm = true, execut
     }
   }
 
-  const unstructuredDocs = await queryUnstructuredDocuments(question);
+  const [unstructuredDocs, graphContext] = await Promise.all([
+    queryUnstructuredDocuments(question),
+    getGraphContextForQuery(question),
+  ]);
+
   if (unstructuredDocs.length > 0) {
     template.context.push(...unstructuredDocs.map(text => ({ text, kind: "business_rule" as const, label: "Unstructured Document RAG", confidence: 0.99, detail: "Extracted from uploaded documents", source: "unstructured" })));
+  }
+
+  if (graphContext.groundingItems.length > 0) {
+    template.context.push(...graphContext.groundingItems);
   }
 
   const rawAmbiguity = llm?.ambiguity ?? template.ambiguity;
@@ -539,7 +555,11 @@ export async function buildSemanticQuery(question: string, useLlm = true, execut
     dimension: isAmbiguous ? "Unresolved" : (llm?.dimension ?? template.dimension),
     semanticContext: template.context,
     retrieval: {
-      sources: ["semantic-catalog-v3", "commerce-knowledge-graph", "orders-schema-2026-08"],
+      sources: [
+        "semantic-catalog-v3",
+        graphContext.activeEngine === "neo4j" ? "neo4j-knowledge-graph" : "commerce-knowledge-graph",
+        "orders-schema-2026-08"
+      ],
       matchedChunks: template.context.length,
       confidence: 0.98,
     },

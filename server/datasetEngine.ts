@@ -1,6 +1,7 @@
 import { invokeLLM, streamLLM } from "./_core/llm.js";
 import { getDb, createCollection, createDefinition } from "./db.js";
 import { queryUnstructuredDocuments } from "./semanticEngine.js";
+import { getGraphContextForQuery, indexDatasetInNeo4j } from "./graphEngine.js";
 
 const MAX_ROWS = 10_000;
 const MAX_FIELDS = 120;
@@ -190,6 +191,12 @@ async function processDatasetUpload(name: string, inputRows: unknown[], sessionI
   })));
   await db.collection("datasetDocuments").createIndex({ text: "text" }, { name: "dataset_document_text_search" });
 
+  try {
+    await indexDatasetInNeo4j(datasetName, inferred, rows.length);
+  } catch (err) {
+    console.warn("[Neo4j] Failed to index dataset in graph:", err);
+  }
+
   return { success: true, datasetId, collectionName, rowCount: rows.length, fieldCount: Object.keys(inferred).length, definitionsCreated, schema };
 }
 
@@ -331,12 +338,14 @@ export async function answerBusinessQuestion(
   let catalogContext = "";
   let datasetDocs: any[] = [];
   let unstructuredDocs: string[] = [];
+  let graphContext: Awaited<ReturnType<typeof getGraphContextForQuery>> | null = null;
   
   if (needsContext) {
-    [catalogContext, datasetDocs, unstructuredDocs] = await Promise.all([
+    [catalogContext, datasetDocs, unstructuredDocs, graphContext] = await Promise.all([
       getCatalogContext(sessionId),
       db ? findRelevantDatasetDocuments(searchContext, sessionId) : Promise.resolve([]),
       db ? queryUnstructuredDocuments(searchContext, 5, sessionId) : Promise.resolve([]),
+      getGraphContextForQuery(lastQuestion),
     ]);
   }
   
@@ -349,6 +358,9 @@ export async function answerBusinessQuestion(
   
   const contextParts: string[] = [];
   if (catalogContext) contextParts.push(catalogContext);
+  if (graphContext && graphContext.relationships.length > 0) {
+    contextParts.push(`### KNOWLEDGE GRAPH RELATIONSHIPS (Neo4j)\n${graphContext.relationships.map(r => `- ${r}`).join("\n")}`);
+  }
   if (rowContext) contextParts.push(`### RETRIEVED TABULAR ROW SAMPLES\n${rowContext}`);
   if (documentContext) contextParts.push(`### RETRIEVED UNSTRUCTURED DOCUMENT KNOWLEDGE\n${documentContext}`);
 
@@ -394,12 +406,14 @@ export async function* streamBusinessQuestion(
   let catalogContext = "";
   let datasetDocs: any[] = [];
   let unstructuredDocs: string[] = [];
+  let graphContext: Awaited<ReturnType<typeof getGraphContextForQuery>> | null = null;
   
   if (needsContext) {
-    [catalogContext, datasetDocs, unstructuredDocs] = await Promise.all([
+    [catalogContext, datasetDocs, unstructuredDocs, graphContext] = await Promise.all([
       getCatalogContext(sessionId),
       db ? findRelevantDatasetDocuments(searchContext, sessionId) : Promise.resolve([]),
       db ? queryUnstructuredDocuments(searchContext, 5, sessionId) : Promise.resolve([]),
+      getGraphContextForQuery(lastQuestion),
     ]);
   }
   
@@ -412,6 +426,9 @@ export async function* streamBusinessQuestion(
   
   const contextParts: string[] = [];
   if (catalogContext) contextParts.push(catalogContext);
+  if (graphContext && graphContext.relationships.length > 0) {
+    contextParts.push(`### KNOWLEDGE GRAPH RELATIONSHIPS (Neo4j)\n${graphContext.relationships.map(r => `- ${r}`).join("\n")}`);
+  }
   if (rowContext) contextParts.push(`### RETRIEVED TABULAR ROW SAMPLES\n${rowContext}`);
   if (documentContext) contextParts.push(`### RETRIEVED UNSTRUCTURED DOCUMENT KNOWLEDGE\n${documentContext}`);
 

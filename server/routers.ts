@@ -89,6 +89,16 @@ export const appRouter = router({
           throw err;
         }
       }),
+    graphStatus: publicProcedure.query(async () => {
+      const { getKnowledgeGraphStatus } = await import("./graphEngine");
+      return getKnowledgeGraphStatus();
+    }),
+    graphContext: publicProcedure
+      .input(z.object({ question: z.string().trim() }))
+      .query(async ({ input }) => {
+        const { getGraphContextForQuery } = await import("./graphEngine");
+        return getGraphContextForQuery(input.question);
+      }),
   }),
   governance: router({
     members: adminProcedure.query(() => db.listStewardMembers()),

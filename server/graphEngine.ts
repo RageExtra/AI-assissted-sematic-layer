@@ -26,7 +26,8 @@ export function getNeo4jConfig() {
   const uri = process.env.NEO4J_URI || process.env.NEO4J_URL;
   const username = process.env.NEO4J_USERNAME || process.env.NEO4J_USER || "neo4j";
   const password = process.env.NEO4J_PASSWORD;
-  return { uri, username, password };
+  const database = process.env.NEO4J_DATABASE;
+  return { uri, username, password, database };
 }
 
 export function getNeo4jDriver(): Driver | null {
@@ -61,9 +62,10 @@ export async function initNeo4jKnowledgeGraph(): Promise<boolean> {
     return false;
   }
 
+  const { database } = getNeo4jConfig();
   let session: Session | null = null;
   try {
-    session = drv.session();
+    session = drv.session(database ? { database } : undefined);
     console.log("[Neo4j] Connected to Neo4j instance. Initializing Knowledge Graph ontology...");
 
     // Create uniqueness constraints
@@ -127,9 +129,10 @@ export async function getGraphContextForQuery(question: string): Promise<GraphCo
 
   // If Neo4j is available, execute dynamic Cypher traversal
   if (drv) {
+    const { database } = getNeo4jConfig();
     let session: Session | null = null;
     try {
-      session = drv.session();
+      session = drv.session(database ? { database } : undefined);
       // Extract keywords for graph matching
       const keywords = qLower
         .replace(/[^a-z0-9\s]/g, " ")
@@ -276,9 +279,10 @@ export async function indexDatasetInNeo4j(
   const drv = getNeo4jDriver();
   if (!drv) return;
 
+  const { database } = getNeo4jConfig();
   let session: Session | null = null;
   try {
-    session = drv.session();
+    session = drv.session(database ? { database } : undefined);
     await session.run(`
       MERGE (ds:Dataset {name: $datasetName})
       SET ds.rowCount = $rowCount, ds.updatedAt = datetime()
@@ -318,7 +322,7 @@ export async function indexDatasetInNeo4j(
  * Diagnostics check for Neo4j connectivity and Knowledge Graph stats.
  */
 export async function getKnowledgeGraphStatus() {
-  const { uri, username } = getNeo4jConfig();
+  const { uri, username, database } = getNeo4jConfig();
   const drv = getNeo4jDriver();
 
   if (!drv) {
@@ -333,7 +337,7 @@ export async function getKnowledgeGraphStatus() {
 
   let session: Session | null = null;
   try {
-    session = drv.session();
+    session = drv.session(database ? { database } : undefined);
     const countRes = await session.run(`
       MATCH (n)
       OPTIONAL MATCH ()-[r]->()

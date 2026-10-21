@@ -1,0 +1,6 @@
+allowBuilds:
+  '@tailwindcss/oxide': true
+  esbuild: true
+  mongodb-memory-server: true
+  protobufjs: true
+  sharp: true
